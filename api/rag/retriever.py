@@ -1,6 +1,17 @@
-import chromadb
+import logging
+import os
 from pathlib import Path
 from typing import List, Dict
+
+import chromadb
+from chromadb.config import Settings
+
+os.environ.setdefault("CHROMADB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb.telemetry.telemetry").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb.telemetry.product").setLevel(logging.CRITICAL)
 
 
 def retrieve(query: str, k: int = 4) -> List[Dict[str, str]]:
@@ -20,7 +31,10 @@ def retrieve(query: str, k: int = 4) -> List[Dict[str, str]]:
         chroma_path = script_dir / "chroma_db"
         
         # Initialize Chroma client
-        chroma_client = chromadb.PersistentClient(path=str(chroma_path))
+        chroma_client = chromadb.PersistentClient(
+            path=str(chroma_path),
+            settings=Settings(anonymized_telemetry=False),
+        )
         
         # Get collection
         collection = chroma_client.get_collection("medical_knowledge")

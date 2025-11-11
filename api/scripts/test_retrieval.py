@@ -1,6 +1,9 @@
 from datetime import datetime
 from pathlib import Path
+import os
 import sys
+
+os.environ.setdefault("CHROMADB_DISABLE_TELEMETRY", "1")
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 

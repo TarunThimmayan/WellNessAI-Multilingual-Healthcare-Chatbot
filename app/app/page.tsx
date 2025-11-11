@@ -9,6 +9,7 @@ const API_BASE = 'http://localhost:8000';
 const defaultProfile: Profile = {
   diabetes: false,
   hypertension: false,
+  pregnancy: false,
   age: undefined,
   sex: undefined,
   city: '',
@@ -27,6 +28,7 @@ type SexOption = 'male' | 'female' | 'other';
 interface Profile {
   diabetes: boolean;
   hypertension: boolean;
+  pregnancy: boolean;
   age?: number;
   sex?: SexOption;
   city?: string;
@@ -229,123 +231,241 @@ export default function Home() {
           </div>
         )}
 
-        {messages.map((message, index) => (
-          <div key={index}>
-            {/* Message Bubble */}
-            <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-2xl rounded-2xl px-6 py-4 ${
-                  message.role === 'user'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-gray-800 shadow-md'
-                }`}
-              >
-                <p className="whitespace-pre-wrap">{message.content}</p>
+        {messages.map((message, index) => {
+          const mentalFact = message.facts?.find(f => f.type === 'mental_health_crisis');
+          const pregnancyFact = message.facts?.find(f => f.type === 'pregnancy_alert');
+          const personalizationFact = message.facts?.find(f => f.type === 'personalization');
 
-                {/* Citations */}
-                {message.citations && message.citations.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <p className="text-xs text-gray-500 mb-1">Sources:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {message.citations.map((cite, i) => (
-                        <span key={i} className="text-xs bg-gray-100 px-2 py-1 rounded">
-                          {cite.topic ? `${cite.topic} (${cite.source})` : cite.source}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+          return (
+            <div key={index}>
+              {/* Message Bubble */}
+              <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-2xl rounded-2xl px-6 py-4 ${
+                    message.role === 'user'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-white text-gray-800 shadow-md'
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap">{message.content}</p>
 
-            {/* Red Flag Alert */}
-            {message.safety?.red_flag && (
-              <div className="mt-4 bg-red-50 border-2 border-red-500 rounded-xl p-6 shadow-lg">
-                <div className="flex items-start gap-4">
-                  <AlertTriangle className="w-8 h-8 text-red-600 flex-shrink-0" />
-                  <div className="flex-1">
-                    <h3 className="text-lg font-bold text-red-800 mb-2">
-                      ⚠️ {lang === 'en' ? 'URGENT: Seek Immediate Medical Care' : 'तत्काल: तुरंत चिकित्सा सहायता लें'}
-                    </h3>
-                    <p className="text-red-700 mb-4">
-                      {lang === 'en'
-                        ? 'Your symptoms may indicate a serious condition requiring immediate attention.'
-                        : 'आपके लक्षण एक गंभीर स्थिति का संकेत हो सकते हैं जिसके लिए तत्काल ध्यान देने की आवश्यकता है।'}
-                    </p>
-
-                    {/* Red Flag Facts */}
-                    {message.facts?.find(f => f.type === 'red_flags') && (
-                      <div className="bg-white rounded-lg p-4 mb-4">
-                        <p className="font-semibold text-red-800 mb-2">Possible conditions:</p>
-                        {message.facts.find(f => f.type === 'red_flags').data.map((rf: any, i: number) => (
-                          <div key={i} className="mb-2">
-                            <span className="font-medium">{rf.symptom}:</span>{' '}
-                            <span className="text-gray-700">{rf.conditions.join(', ')}</span>
-                          </div>
+                  {/* Citations */}
+                  {message.citations && message.citations.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <p className="text-xs text-gray-500 mb-1">Sources:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {message.citations.map((cite, i) => (
+                          <span key={i} className="text-xs bg-gray-100 px-2 py-1 rounded">
+                            {cite.topic ? `${cite.topic} (${cite.source})` : cite.source}
+                          </span>
                         ))}
                       </div>
-                    )}
-
-                    <button
-                      onClick={() => window.open('tel:108')}
-                      className="flex items-center gap-2 bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition"
-                    >
-                      <Phone className="w-5 h-5" />
-                      {lang === 'en' ? 'Call Emergency (108)' : 'आपातकालीन कॉल करें (108)'}
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
 
-            {/* Facts Panel */}
-            {message.facts && message.facts.length > 0 && !message.safety?.red_flag && (
-              <div className="mt-4 bg-blue-50 rounded-xl p-4 shadow">
-                <h4 className="font-semibold text-blue-900 mb-3">📊 Additional Information</h4>
-                {message.facts.map((fact, i) => (
-                  <div key={i} className="mb-3">
-                    {fact.type === 'contraindications' && (
+              {/* Red Flag Alert */}
+              {message.safety?.red_flag && (
+                <div className="mt-4 bg-red-50 border-2 border-red-500 rounded-xl p-6 shadow-lg">
+                  <div className="flex items-start gap-4">
+                    <AlertTriangle className="w-8 h-8 text-red-600 flex-shrink-0" />
+                    <div className="flex-1 space-y-4">
                       <div>
-                        <p className="font-medium text-blue-800 mb-1">⛔ Things to avoid:</p>
-                        <ul className="list-disc list-inside text-gray-700">
-                          {fact.data.map((c: any, j: number) => (
-                            <li key={j}>
-                              {c.avoid} <span className="text-sm text-gray-500">(due to {c.because.join(', ')})</span>
-                            </li>
-                          ))}
-                        </ul>
+                        <h3 className="text-lg font-bold text-red-800 mb-2">
+                          ⚠️ {lang === 'en' ? 'URGENT: Seek Immediate Medical Care' : 'तत्काल: तुरंत चिकित्सा सहायता लें'}
+                        </h3>
+                        <p className="text-red-700">
+                          {lang === 'en'
+                            ? 'Your symptoms may indicate a serious condition requiring immediate attention.'
+                            : 'आपके लक्षण एक गंभीर स्थिति का संकेत हो सकते हैं जिसके लिए तत्काल ध्यान देने की आवश्यकता है।'}
+                        </p>
                       </div>
-                    )}
-                    {fact.type === 'safe_actions' && (
-                      <div>
-                        <p className="font-medium text-blue-800 mb-1">✅ Generally safe self-care:</p>
-                        <ul className="list-disc list-inside text-gray-700">
-                          {fact.data.map((item: any, j: number) => (
-                            <li key={j}>{item.safeAction}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {fact.type === 'providers' && (
-                      <div>
-                        <p className="font-medium text-blue-800 mb-1">🏥 Healthcare providers:</p>
-                        <ul className="space-y-1 text-gray-700">
-                          {fact.data.map((p: any, j: number) => (
-                            <li key={j}>
-                              <strong>{p.provider}</strong>
-                              {p.mode ? ` • ${p.mode}` : ''}
-                              {p.phone ? ` – ${p.phone}` : ''}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+
+                      {/* Red Flag Facts */}
+                      {message.facts?.find(f => f.type === 'red_flags') && (
+                        <div className="bg-white rounded-lg p-4">
+                          <p className="font-semibold text-red-800 mb-2">Possible conditions:</p>
+                          {message.facts
+                            .find(f => f.type === 'red_flags')
+                            .data.map((rf: any, i: number) => (
+                              <div key={i} className="mb-2">
+                                <span className="font-medium">{rf.symptom}:</span>{' '}
+                                <span className="text-gray-700">{rf.conditions.join(', ')}</span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+
+                      {mentalFact && (
+                        <div className="bg-white rounded-lg p-4 border border-red-200">
+                          <p className="font-semibold text-red-800 mb-2">🧠 Mental health crisis support</p>
+                          {mentalFact.data.matched?.length > 0 && (
+                            <p className="text-sm text-gray-700 mb-2">
+                              {lang === 'en'
+                                ? `Detected phrases: ${mentalFact.data.matched.join(', ')}`
+                                : `पहचाने गए वाक्यांश: ${mentalFact.data.matched.join(', ')}`}
+                            </p>
+                          )}
+                          <ul className="list-disc list-inside text-gray-700 space-y-1">
+                            {mentalFact.data.actions?.map((action: string, j: number) => (
+                              <li key={j}>{action}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {pregnancyFact && (
+                        <div className="bg-white rounded-lg p-4 border border-red-200">
+                          <p className="font-semibold text-red-800 mb-2">🤰 Pregnancy alert</p>
+                          {pregnancyFact.data.matched?.length > 0 && (
+                            <p className="text-sm text-gray-700 mb-2">
+                              {lang === 'en'
+                                ? `Detected: ${pregnancyFact.data.matched.join(', ')}`
+                                : `पहचाने गए संकेत: ${pregnancyFact.data.matched.join(', ')}`}
+                            </p>
+                          )}
+                          <ul className="list-disc list-inside text-gray-700 space-y-1">
+                            {pregnancyFact.data.guidance?.map((tip: string, j: number) => (
+                              <li key={j}>{tip}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {personalizationFact && (
+                        <div className="bg-white rounded-lg p-4 border border-yellow-200">
+                          <p className="font-semibold text-yellow-700 mb-2">👤 Personalization notes</p>
+                          <ul className="list-disc list-inside text-gray-700 space-y-1">
+                            {personalizationFact.data.map((note: string, j: number) => (
+                              <li key={j}>{note}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => window.open('tel:108')}
+                        className="flex items-center gap-2 bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition"
+                      >
+                        <Phone className="w-5 h-5" />
+                        {lang === 'en' ? 'Call Emergency (108)' : 'आपातकालीन कॉल करें (108)'}
+                      </button>
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+                </div>
+              )}
+
+              {/* Facts Panel */}
+              {message.facts && message.facts.length > 0 && !message.safety?.red_flag && (
+                <div className="mt-4 bg-blue-50 rounded-xl p-4 shadow">
+                  <h4 className="font-semibold text-blue-900 mb-3">📊 Additional Information</h4>
+                  {message.facts.map((fact, i) => (
+                    <div key={i} className="mb-3">
+                      {fact.type === 'contraindications' && fact.data.length > 0 && (
+                        <div>
+                          <p className="font-medium text-blue-800 mb-1">⛔ Things to avoid:</p>
+                          <div className="space-y-2">
+                            {fact.data.map((group: any, j: number) => (
+                              <div key={j} className="bg-white rounded-lg px-3 py-2 border border-blue-100">
+                                <p className="text-sm font-semibold text-blue-700">{group.condition}</p>
+                                <ul className="list-disc list-inside text-gray-700 text-sm">
+                                  {group.avoid.map((item: string, k: number) => (
+                                    <li key={k}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {fact.type === 'safe_actions' && fact.data.length > 0 && (
+                        <div>
+                          <p className="font-medium text-blue-800 mb-1">✅ Generally safe self-care:</p>
+                          <div className="space-y-2">
+                            {fact.data.map((group: any, j: number) => (
+                              <div key={j} className="bg-white rounded-lg px-3 py-2 border border-blue-100">
+                                <p className="text-sm font-semibold text-blue-700">{group.condition}</p>
+                                <ul className="list-disc list-inside text-gray-700 text-sm">
+                                  {group.actions.map((item: string, k: number) => (
+                                    <li key={k}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {fact.type === 'providers' && (
+                        <div>
+                          <p className="font-medium text-blue-800 mb-1">🏥 Healthcare providers:</p>
+                          <ul className="space-y-1 text-gray-700">
+                            {fact.data.map((p: any, j: number) => (
+                              <li key={j}>
+                                <strong>{p.provider}</strong>
+                                {p.mode ? ` • ${p.mode}` : ''}
+                                {p.phone ? ` – ${p.phone}` : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {fact.type === 'mental_health_crisis' && (
+                        <div>
+                          <p className="font-medium text-blue-800 mb-1">🧠 Mental health support:</p>
+                          {fact.data.matched?.length > 0 && (
+                            <p className="text-sm text-gray-700">
+                              {lang === 'en'
+                                ? `Detected phrases: ${fact.data.matched.join(', ')}`
+                                : `पहचाने गए वाक्यांश: ${fact.data.matched.join(', ')}`}
+                            </p>
+                          )}
+                          <ul className="list-disc list-inside text-gray-700 text-sm mt-1 space-y-1">
+                            {fact.data.actions?.map((action: string, j: number) => (
+                              <li key={j}>{action}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {fact.type === 'pregnancy_alert' && (
+                        <div>
+                          <p className="font-medium text-blue-800 mb-1">🤰 Pregnancy guidance:</p>
+                          {fact.data.matched?.length > 0 && (
+                            <p className="text-sm text-gray-700">
+                              {lang === 'en'
+                                ? `Detected: ${fact.data.matched.join(', ')}`
+                                : `पहचाने गए संकेत: ${fact.data.matched.join(', ')}`}
+                            </p>
+                          )}
+                          <ul className="list-disc list-inside text-gray-700 text-sm mt-1 space-y-1">
+                            {fact.data.guidance?.map((tip: string, j: number) => (
+                              <li key={j}>{tip}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {fact.type === 'personalization' && (
+                        <div>
+                          <p className="font-medium text-blue-800 mb-1">👤 Personalization notes:</p>
+                          <ul className="list-disc list-inside text-gray-700 text-sm space-y-1">
+                            {fact.data.map((note: string, j: number) => (
+                              <li key={j}>{note}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         {isLoading && (
           <div className="flex justify-start">
@@ -434,6 +554,20 @@ export default function Home() {
                 </span>
               </label>
 
+              {(profile.sex !== 'male') && (
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={profile.pregnancy}
+                    onChange={(e) => setProfile({ ...profile, pregnancy: e.target.checked })}
+                    className="w-5 h-5 text-indigo-600 rounded"
+                  />
+                  <span className="text-gray-700">
+                    {lang === 'en' ? 'I am currently pregnant' : 'मैं वर्तमान में गर्भवती हूं'}
+                  </span>
+                </label>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -462,6 +596,10 @@ export default function Home() {
                       setProfile({
                         ...profile,
                         sex: e.target.value ? (e.target.value as SexOption) : undefined,
+                        pregnancy:
+                          e.target.value === 'female'
+                            ? profile.pregnancy
+                            : false,
                       })
                     }
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"

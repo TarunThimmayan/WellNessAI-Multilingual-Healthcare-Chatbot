@@ -6,7 +6,14 @@ import os
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
-from .safety import detect_red_flags, extract_symptoms
+os.environ.setdefault("CHROMADB_DISABLE_TELEMETRY", "1")
+
+from .safety import (
+    detect_red_flags,
+    detect_mental_health_crisis,
+    detect_pregnancy_emergency,
+    extract_symptoms,
+)
 from .router import is_graph_intent, extract_city
 from .rag.retriever import retrieve
 from .models import ChatRequest, ChatResponse, Profile
@@ -52,6 +59,31 @@ def ensure_neo4j() -> bool:
         except Exception:
             _neo4j_available = False
     return bool(_neo4j_available)
+
+
+def build_personalization_notes(profile: Profile) -> List[str]:
+    notes: List[str] = []
+
+    if profile.age is not None:
+        if profile.age < 2:
+            notes.append(
+                "User is an infant (<2 years). Avoid medication dosing advice and urge immediate pediatric review if symptoms worsen."
+            )
+        elif profile.age < 12:
+            notes.append(
+                "User is a child (<12 years). Provide caregiver-friendly guidance and highlight when to see a pediatrician."
+            )
+        elif profile.age >= 65:
+            notes.append(
+                "User is an older adult (65+). Emphasise monitoring chronic conditions and the risks of medication interactions."
+            )
+
+    if profile.pregnancy:
+        notes.append(
+            "User is currently pregnant. Avoid contraindicated medicines and recommend contacting the obstetric team for concerning symptoms."
+        )
+
+    return notes
 
 
 def graph_get_red_flags(symptoms: List[str]) -> List[Dict[str, Any]]:
@@ -188,9 +220,12 @@ async def chat(request: ChatRequest):
     text = request.text
     lang = request.lang
     profile: Profile = request.profile
+    personalization_notes = build_personalization_notes(profile)
     
     # Step 1: Safety detection
     safety_result = detect_red_flags(text, lang)
+    mental_health = detect_mental_health_crisis(text, lang)
+    pregnancy_alert = detect_pregnancy_emergency(text)
     
     # Step 2: Determine routing
     use_graph = is_graph_intent(text)
@@ -210,6 +245,29 @@ async def chat(request: ChatRequest):
                 "data": red_flag_results
             })
     
+    # Step 3b: Mental health crisis guidance
+    if mental_health["crisis"]:
+        facts.append({
+            "type": "mental_health_crisis",
+            "data": {
+                "matched": mental_health["matched"],
+                "actions": mental_health["first_aid"],
+            }
+        })
+    
+    # Step 3c: Pregnancy specific alert messaging
+    if pregnancy_alert["concern"]:
+        facts.append({
+            "type": "pregnancy_alert",
+            "data": {
+                "matched": pregnancy_alert["matched"],
+                "guidance": [
+                    "Severe pregnancy symptoms need urgent medical review.",
+                    "Contact your obstetrician or emergency services immediately.",
+                ],
+            }
+        })
+    
     # Step 4: Execute appropriate query path
     if use_graph:
         # Graph-based query
@@ -221,10 +279,14 @@ async def chat(request: ChatRequest):
             user_conditions.append("Diabetes")
         if profile.hypertension:
             user_conditions.append("Hypertension")
+        if profile.pregnancy:
+            user_conditions.append("Pregnancy")
 
         condition_keywords = {
             "diabetes": "Diabetes",
             "hypertension": "Hypertension",
+            "pregnancy": "Pregnancy",
+            "pregnant": "Pregnancy",
         }
         text_lower = text.lower()
         for keyword, label in condition_keywords.items():
@@ -234,16 +296,41 @@ async def chat(request: ChatRequest):
         if user_conditions:
             contras = graph_get_contraindications(user_conditions)
             if contras:
-                facts.append({
-                    "type": "contraindications",
-                    "data": contras
-                })
-            
-            safe_actions = graph_get_safe_actions(user_conditions)
-            if safe_actions:
+                condition_avoid_map: Dict[str, List[str]] = {}
+                for entry in contras:
+                    avoid_item = entry.get("avoid")
+                    for cond in entry.get("because", []):
+                        if cond in user_conditions and avoid_item:
+                            condition_avoid_map.setdefault(cond, []).append(avoid_item)
+
+                if condition_avoid_map:
+                    facts.append({
+                        "type": "contraindications",
+                        "data": [
+                            {
+                                "condition": cond,
+                                "avoid": sorted(set(items))
+                            }
+                            for cond, items in condition_avoid_map.items()
+                        ]
+                    })
+
+            safe_actions_map: Dict[str, List[str]] = {}
+            for condition in user_conditions:
+                safe_entries = graph_get_safe_actions([condition])
+                actions = sorted(
+                    {entry.get("safeAction") for entry in safe_entries if entry.get("safeAction")}
+                )
+                if actions:
+                    safe_actions_map[condition] = actions
+
+            if safe_actions_map:
                 facts.append({
                     "type": "safe_actions",
-                    "data": safe_actions
+                    "data": [
+                        {"condition": cond, "actions": actions}
+                        for cond, actions in safe_actions_map.items()
+                    ]
                 })
         
         # Check for provider query
@@ -271,11 +358,21 @@ async def chat(request: ChatRequest):
                 if fact_group["type"] == "red_flags":
                     fact_summary += "⚠️ Red flag conditions detected\n"
                 elif fact_group["type"] == "contraindications":
-                    fact_summary += f"⛔ Things to avoid: {', '.join([c['avoid'] for c in fact_group['data']])}\n"
+                    avoid_phrases = []
+                    for entry in fact_group["data"]:
+                        avoid_items = ", ".join(entry["avoid"])
+                        avoid_phrases.append(f"{entry['condition']}: {avoid_items}")
+                    if avoid_phrases:
+                        fact_summary += f"⛔ Things to avoid — { '; '.join(avoid_phrases) }\n"
                 elif fact_group["type"] == "providers":
                     fact_summary += f"🏥 {len(fact_group['data'])} healthcare providers found\n"
             
             context = context + fact_summary
+
+        if personalization_notes:
+            context += "\n\nPersonalization notes:\n" + "\n".join(f"- {note}" for note in personalization_notes)
+            if not any(f.get("type") == "personalization" for f in facts):
+                facts.append({"type": "personalization", "data": personalization_notes})
         
         answer = generate_answer(context, text, lang)
         
@@ -301,12 +398,18 @@ async def chat(request: ChatRequest):
                 personalized_conditions.append("diabetes")
             if profile.hypertension:
                 personalized_conditions.append("hypertension")
+            if profile.pregnancy:
+                personalized_conditions.append("pregnancy")
             if personalized_conditions:
                 context += (
                     "\n\nNote: User has "
                     + " and ".join(personalized_conditions)
                     + ". Provide relevant precautions."
                 )
+
+            if personalization_notes:
+                context += "\n\nPersonalization notes:\n" + "\n".join(f"- {note}" for note in personalization_notes)
+                facts.append({"type": "personalization", "data": personalization_notes})
             
             answer = generate_answer(context, text, lang)
     
@@ -317,12 +420,18 @@ async def chat(request: ChatRequest):
             disclaimer = "\n\n⚠️ यह केवल सामान्य जानकारी है, चिकित्सा सलाह नहीं। उचित निदान और उपचार के लिए स्वास्थ्य पेशेवर से परामर्श करें।"
         answer += disclaimer
     
+    safety_payload = {
+        **safety_result,
+        "mental_health": mental_health,
+        "pregnancy": pregnancy_alert,
+    }
+    
     return ChatResponse(
         answer=answer,
         route=route,
         facts=facts,
         citations=citations,
-        safety=safety_result
+        safety=safety_payload,
     )
 
 

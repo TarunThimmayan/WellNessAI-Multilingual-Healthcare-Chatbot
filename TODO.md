@@ -85,23 +85,30 @@
 ## 📋 Phase 3: Backend Enhancements (Priority: MEDIUM)
 
 ### 3.1 Safety & Routing Improvements
-- [ ] Expand red-flag keywords (Hindi + English)
-- [ ] Add mental health crisis detection
-- [ ] Improve symptom extraction (use NLP if needed)
-- [ ] Add pregnancy-specific red flags
-- [ ] Improve graph routing heuristics (better pattern matching)
+- [x] Expand red-flag keywords (Hindi + English)
+- [x] Add mental health crisis detection
+- [x] Improve symptom extraction (use NLP if needed)
+- [x] Add pregnancy-specific red flags
+- [x] Improve graph routing heuristics (better pattern matching)
 
 ### 3.2 Personalization
-- [ ] Enhance profile handling (age, sex, pregnancy status)
-- [ ] Add age-based recommendations (children vs adults)
-- [ ] Add pregnancy-aware responses
-- [ ] Improve contraindication filtering based on profile
+- [x] Enhance profile handling (age, sex, pregnancy status)
+- [x] Add age-based recommendations (children vs adults)
+- [x] Add pregnancy-aware responses
+- [x] Improve contraindication filtering based on profile
 
 ### 3.3 Response Quality
 - [ ] Improve LLM prompts (better structure, clearer guidelines)
 - [ ] Add Hindi language support in responses (not just UI)
+- [ ] Add automatic language detection & translation pipeline (Whisper → English → target language)
 - [ ] Add source citations in responses (link to original sources)
 - [ ] Improve fact integration (better formatting of graph facts)
+
+### 3.5 Voice Loop & Latency
+- [ ] Implement end-to-end voice pipeline (audio upload → STT → RAG → translation → TTS)
+- [ ] Optimize latency (streaming STT, parallel safety/routing, caching embeddings)
+- [ ] Integrate TTS provider (ElevenLabs or alternative) with fallback to browser speech
+- [ ] Add graceful fallbacks when TTS/STT services are unavailable
 
 ### 3.4 Error Handling & Logging
 - [ ] Add proper error handling for all endpoints
@@ -256,9 +263,11 @@
 3. **Expand seed.csv** → Add mental health, pediatric, pregnancy red flags
 4. **Set up Neo4j** → Run ingestion script
 5. **Test end-to-end** → Verify everything works with new data
-6. **Improve frontend styling** → Make it look professional
-7. **Add Hindi response support** → Backend should respond in Hindi when requested
-8. **Prepare demo scenarios** → Test all key features
+6. **Implement low-latency voice roundtrip** → STT → RAG → Translation → TTS
+7. **Improve frontend styling** → Make it look professional
+8. **Add Hindi response support** → Backend should respond in Hindi when requested
+9. **Prepare demo scenarios** → Test all key features
+10. **Mute Chroma telemetry warnings** → Set `CHROMADB_DISABLE_TELEMETRY=1`
 
 ## 📝 Notes
 
