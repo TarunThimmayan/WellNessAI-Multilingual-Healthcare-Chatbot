@@ -7,15 +7,6 @@ body {
   @apply h-full bg-gradient-to-br from-ocean-50 via-white to-mint-50 text-slate-800;
 }
 
-body {
-  @apply antialiased;
+#root {
+  @apply h-full;
 }
-
-* {
-  @apply box-border;
-}
-
-::selection {
-  @apply bg-ocean-500/20 text-ocean-900;
-}
-
