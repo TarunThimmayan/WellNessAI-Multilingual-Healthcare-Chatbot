@@ -365,21 +365,8 @@ export default function Home() {
   const sidebarClasses = useMemo(
     () =>
       clsx(
-        'fixed inset-y-0 left-0 z-40 flex w-72 flex-col gap-4 overflow-y-auto bg-white/95 p-6 shadow-2xl transition-transform duration-300 lg:relative lg:inset-auto lg:z-auto lg:w-64 lg:overflow-visible lg:bg-transparent lg:p-0 lg:shadow-none',
-        isSidebarOpen
-          ? 'translate-x-0 lg:flex lg:translate-x-0'
-          : '-translate-x-full lg:hidden'
-      ),
-    [isSidebarOpen]
-  );
-
-  const layoutClasses = useMemo(
-    () =>
-      clsx(
-        'mx-auto flex w-full max-w-6xl flex-col gap-10 lg:grid lg:items-start lg:gap-14',
-        isSidebarOpen
-          ? 'lg:grid-cols-[260px_minmax(0,1fr)]'
-          : 'lg:grid-cols-[minmax(0,1fr)]'
+        'fixed inset-y-0 left-0 z-40 flex w-72 flex-col gap-6 overflow-y-auto border-r border-white/60 bg-white/95 px-6 py-8 shadow-2xl transition-transform duration-300 backdrop-blur lg:z-30 lg:translate-x-0 lg:bg-white/85 lg:shadow-none',
+        isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
       ),
     [isSidebarOpen]
   );
@@ -393,44 +380,61 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="relative overflow-hidden px-6 pb-8 pt-10 sm:px-10 lg:px-16">
-        <div className="absolute inset-x-1/3 top-0 h-40 rounded-full bg-ocean-300/40 blur-3xl" />
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-ocean-200 to-transparent" />
-        <div className="relative mx-auto flex w-full max-w-6xl items-center justify-between pb-4">
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen((prev) => !prev)}
-            className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-ocean-200 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
-          >
-            {isSidebarOpen ? (
-              <X className="h-4 w-4" aria-hidden />
-            ) : (
-              <Menu className="h-4 w-4" aria-hidden />
-            )}
-            <span className="hidden sm:inline">
-              {isSidebarOpen ? 'Hide panel' : 'Show panel'}
-            </span>
-            <span className="sr-only">Toggle sidebar</span>
-          </button>
-        </div>
-        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 lg:items-start">
-          <div className="flex-1 max-w-3xl space-y-3 text-left">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/70 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-ocean-700 shadow-sm backdrop-blur animate-fadeUp">
-              <Sparkle className="h-3.5 w-3.5" />
-              Health Companion
-            </span>
-            <h1 className="text-3xl font-bold text-slate-900 sm:text-4xl lg:text-5xl">
-              Compassionate guidance for everyday health questions
-            </h1>
-            <p className="max-w-2xl text-base text-slate-600 sm:text-lg">
-              Receive calming, evidence-aligned direction on symptoms and self-care. Every
-              answer includes safety guardrails, gentle language, and accessible
-              formatting.
-            </p>
+    <div className="relative min-h-screen bg-gradient-to-br from-ocean-50 via-white to-mint-50 text-slate-800">
+      <aside className={sidebarClasses} aria-label="Primary navigation">
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-gradient-to-br from-ocean-400 to-mint-400 p-2 text-white shadow">
+            <Sparkle className="h-5 w-5" aria-hidden />
+          </span>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-ocean-500">Health Companion</p>
+            <p className="text-base font-semibold text-slate-700">Care Console</p>
           </div>
         </div>
-      </header>
+
+        <div className="space-y-5 pt-6">
+          <div className="rounded-3xl border border-white/70 bg-white/80 p-5 shadow">
+            <p className="text-sm font-semibold text-slate-600">Welcome back</p>
+            <p className="mt-2 text-sm leading-relaxed text-slate-500">
+              I'm ready whenever you need help planning next steps or spotting red flags.
+            </p>
+          </div>
+
+          {error && <ErrorCallout message={error} onDismiss={() => setError(null)} />}
+
+          <nav className="flex flex-col gap-3" aria-label="Quick actions">
+            <button
+              type="button"
+              onClick={() => {
+                setIsSidebarOpen(false);
+                setShowPreferences(true);
+              }}
+              className="flex items-center justify-between rounded-2xl border border-white/60 bg-white/80 px-5 py-4 text-left shadow transition hover:border-ocean-200 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
+            >
+              <span className="flex items-center gap-3 text-slate-700">
+                <Settings className="h-5 w-5 text-ocean-500" />
+                <span className="text-sm font-semibold leading-tight">Session preferences</span>
+              </span>
+              <span className="text-xs uppercase tracking-[0.3em] text-ocean-400">Open</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsSidebarOpen(false);
+                setShowSafety(true);
+              }}
+              className="flex items-center justify-between rounded-2xl border border-white/60 bg-white/80 px-5 py-4 text-left shadow transition hover:border-mint-200 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mint-200"
+            >
+              <span className="flex items-center gap-3 text-slate-700">
+                <HeartPulse className="h-5 w-5 text-mint-600" />
+                <span className="text-sm font-semibold leading-tight">Safety guidance</span>
+              </span>
+              <span className="text-xs uppercase tracking-[0.3em] text-mint-500">Open</span>
+            </button>
+          </nav>
+        </div>
+      </aside>
 
       {isSidebarOpen && (
         <div
@@ -440,285 +444,248 @@ export default function Home() {
         />
       )}
 
-      <main className="flex-1 px-4 pb-12 sm:px-6 lg:px-16">
-        <div className={layoutClasses}>
-          <aside className={sidebarClasses} aria-label="Quick actions">
-            <div className="mb-4 flex items-center justify-between lg:hidden">
-              <h2 className="text-sm font-semibold text-slate-600">Quick actions</h2>
-              <button
-                type="button"
-                onClick={() => setIsSidebarOpen(false)}
-                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white/80 p-1.5 text-slate-500 shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
-                aria-label="Close quick actions"
-              >
-                <X className="h-4 w-4" />
-              </button>
+      <div className="flex min-h-screen flex-col lg:ml-72">
+        <header className="flex items-center justify-between border-b border-white/60 bg-white/80 px-4 py-4 shadow-sm backdrop-blur sm:px-6 lg:px-10">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen((prev) => !prev)}
+              className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-ocean-200 hover:text-ocean-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200 lg:hidden"
+            >
+              {isSidebarOpen ? <X className="h-4 w-4" aria-hidden /> : <Menu className="h-4 w-4" aria-hidden />}
+              <span>{isSidebarOpen ? 'Hide panel' : 'Show panel'}</span>
+            </button>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-ocean-500">Live care session</p>
+              <h1 className="text-lg font-semibold text-slate-800 sm:text-xl">Welcome to your Health Companion</h1>
             </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-ocean-100 bg-ocean-50 px-4 py-1 text-sm font-medium text-ocean-700 shadow-sm">
+            <span className="flex h-2.5 w-2.5 animate-pulse rounded-full bg-mint-500" />
+            Online
+          </div>
+        </header>
 
-            {error && (
-              <ErrorCallout message={error} onDismiss={() => setError(null)} />
-            )}
-
-            <nav className="flex flex-col gap-3" aria-label="Secondary panels">
-              <button
-                type="button"
-                onClick={() => setShowPreferences(true)}
-                className="flex items-center justify-between rounded-2xl border border-white/60 bg-white/75 px-5 py-4 text-left shadow-lg transition hover:border-ocean-200 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
-              >
-                <span className="flex items-center gap-3 text-slate-700">
-                  <Settings className="h-5 w-5 text-ocean-500" />
-                  <span className="text-sm font-semibold leading-tight">
-                    Session preferences
-                  </span>
-                </span>
-                <span className="text-xs uppercase tracking-[0.3em] text-ocean-400">
-                  Open
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowSafety(true)}
-                className="flex items-center justify-between rounded-2xl border border-white/60 bg-white/75 px-5 py-4 text-left shadow-lg transition hover:border-mint-200 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mint-200"
-              >
-                <span className="flex items-center gap-3 text-slate-700">
-                  <HeartPulse className="h-5 w-5 text-mint-600" />
-                  <span className="text-sm font-semibold leading-tight">
-                    Safety guidance
-                  </span>
-                </span>
-                <span className="text-xs uppercase tracking-[0.3em] text-mint-500">
-                  Open
-                </span>
-              </button>
-            </nav>
-          </aside>
-
+        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10">
           <section
-            className="flex h-[72vh] flex-col rounded-[30px] border border-white/60 bg-white/80 shadow-2xl shadow-ocean-100/40 backdrop-blur-md transition md:h-[74vh] lg:h-[76vh]"
+            className="mx-auto flex h-full max-w-4xl flex-col rounded-[30px] border border-white/60 bg-white/90 shadow-2xl shadow-ocean-100/40 backdrop-blur"
             aria-label="Chat with health assistant"
           >
-            <div className="flex items-center justify-between border-b border-white/70 bg-white/70 px-5 py-4 backdrop-blur-sm sm:px-7">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-800 sm:text-xl">
-                  Live care session
-                </h2>
-                <p className="text-xs font-medium uppercase tracking-[0.3em] text-ocean-500">
-                  Not a substitute for emergency care
-                </p>
-              </div>
-              <div className="flex items-center gap-2 rounded-full border border-ocean-100 bg-ocean-50 px-4 py-1 text-sm font-medium text-ocean-700 shadow-sm">
-                <span className="flex h-2.5 w-2.5 animate-pulse rounded-full bg-mint-500" />
-                Online
+            <div className="rounded-t-[30px] border-b border-white/70 bg-white/75 px-5 py-6 sm:px-8">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-800 sm:text-3xl">
+                    Compassionate guidance for everyday health questions
+                  </h2>
+                  <p className="mt-2 text-base text-slate-600 sm:text-lg">
+                    Receive calming, evidence-aligned direction on symptoms and self-care. Every answer includes safety guardrails,
+                    gentle language, and accessible formatting.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-ocean-100 bg-ocean-50/60 p-4 text-sm text-slate-600">
+                  <p className="font-semibold text-ocean-700">Important reminders</p>
+                  <p className="mt-1 leading-relaxed">
+                    I can help you understand mild to moderate symptoms, highlight red-flag warnings, and point you toward reliable
+                    self-care steps. I am not a substitute for emergency services or licensed clinicians.
+                  </p>
+                  <p className="mt-2 text-xs font-medium uppercase tracking-[0.3em] text-ocean-500">
+                    Not a substitute for emergency care
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-6">
-              <div className="mx-auto flex w-full flex-col gap-5 px-2 lg:max-w-3xl lg:px-4" role="list" aria-live="polite">
-                {messages.length === 0 && (
-                  <div className="flex justify-center pt-20">
-                    <div className="max-w-lg rounded-3xl border border-white/70 bg-white/80 p-6 text-center shadow-lg">
-                      <h3 className="text-xl font-semibold text-slate-800">
-                        {currentLanguage.introTitle}
-                      </h3>
-                      <p className="mt-2 text-sm text-slate-600">
-                        {currentLanguage.introSubtitle}
-                      </p>
+            <div className="flex-1 overflow-hidden">
+              <div className="flex h-full flex-col gap-5 overflow-y-auto px-4 py-5 sm:px-6">
+                <div
+                  className="mx-auto flex w-full flex-col gap-5 px-2 lg:max-w-3xl lg:px-4"
+                  role="list"
+                  aria-live="polite"
+                >
+                  {messages.length === 0 && (
+                    <div className="flex justify-center pt-20">
+                      <div className="max-w-lg rounded-3xl border border-white/70 bg-white/80 p-6 text-center shadow-lg">
+                        <h3 className="text-xl font-semibold text-slate-800">{currentLanguage.introTitle}</h3>
+                        <p className="mt-2 text-sm text-slate-600">{currentLanguage.introSubtitle}</p>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {messages.map((message, index) => (
-                  <div key={message.id} className="space-y-4">
-                    <ChatMessage message={message} index={index} />
+                  {messages.map((message, index) => (
+                    <div key={message.id} className="space-y-4">
+                      <ChatMessage message={message} index={index} />
 
-                    {message.safety?.red_flag && (
-                      <div className="rounded-3xl border border-red-200/80 bg-red-50/70 p-5 text-red-800 shadow-lg shadow-red-100/50">
-                        <div className="flex items-start gap-3">
-                          <AlertTriangle className="h-6 w-6 flex-shrink-0 text-red-500" />
-                          <div className="space-y-3">
-                            <div>
-                              <h3 className="flex items-center gap-2 text-base font-bold">
-                                <span role="img" aria-hidden>
-                                  ⚠️
-                                </span>
-                                Seek immediate medical care
-                              </h3>
-                              <p className="mt-1 text-sm text-red-700/90">
-                                Your symptoms may signal an urgent concern. If you feel unsafe
-                                right now, contact emergency services.
-                              </p>
+                      {message.safety?.red_flag && (
+                        <div className="rounded-3xl border border-red-200/80 bg-red-50/70 p-5 text-red-800 shadow-lg shadow-red-100/50">
+                          <div className="flex items-start gap-3">
+                            <AlertTriangle className="h-6 w-6 flex-shrink-0 text-red-500" />
+                            <div className="space-y-3">
+                              <div>
+                                <h3 className="flex items-center gap-2 text-base font-bold">
+                                  <span role="img" aria-hidden>
+                                    ⚠️
+                                  </span>
+                                  Seek immediate medical care
+                                </h3>
+                                <p className="mt-1 text-sm text-red-700/90">
+                                  Your symptoms may signal an urgent concern. If you feel unsafe right now, contact emergency services.
+                                </p>
+                              </div>
+                              {message.facts
+                                ?.find((fact: any) => fact.type === 'red_flags')
+                                ?.data?.map((flag: any, idx: number) => (
+                                  <div
+                                    key={`${flag.symptom}-${idx}`}
+                                    className="rounded-2xl border border-red-200 bg-white/80 p-3 text-sm text-red-700"
+                                  >
+                                    <strong>{flag.symptom}</strong>: {flag.conditions.join(', ')}
+                                  </div>
+                                ))}
+                              <button
+                                onClick={() => window.open('tel:108')}
+                                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-2 font-semibold text-white shadow transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
+                              >
+                                <Phone className="h-4 w-4" />
+                                Call Emergency (108)
+                              </button>
                             </div>
-                            {message.facts
-                              ?.find((fact: any) => fact.type === 'red_flags')
-                              ?.data?.map((flag: any, idx: number) => (
-                                <div
-                                  key={`${flag.symptom}-${idx}`}
-                                  className="rounded-2xl border border-red-200 bg-white/80 p-3 text-sm text-red-700"
-                                >
-                                  <strong>{flag.symptom}</strong>: {flag.conditions.join(', ')}
-                                </div>
-                              ))}
-                            <button
-                              onClick={() => window.open('tel:108')}
-                              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-2 font-semibold text-white shadow transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
-                            >
-                              <Phone className="h-4 w-4" />
-                              Call Emergency (108)
-                            </button>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {message.facts && message.facts.length > 0 && !message.safety?.red_flag && (
-                      <div className="rounded-3xl border border-ocean-100 bg-ocean-50/70 p-5 text-sm text-slate-700 shadow">
-                        <h4 className="text-sm font-semibold uppercase tracking-[0.3em] text-ocean-600">
-                          Additional insights
-                        </h4>
-                        <div className="mt-3 space-y-3">
-                          {message.facts.map((fact: any, factIndex: number) => {
-                            if (!fact?.data || fact.data.length === 0) return null;
+                      {message.facts && message.facts.length > 0 && !message.safety?.red_flag && (
+                        <div className="rounded-3xl border border-ocean-100 bg-ocean-50/70 p-5 text-sm text-slate-700 shadow">
+                          <h4 className="text-sm font-semibold uppercase tracking-[0.3em] text-ocean-600">Additional insights</h4>
+                          <div className="mt-3 space-y-3">
+                            {message.facts.map((fact: any, factIndex: number) => {
+                              if (!fact?.data || fact.data.length === 0) return null;
 
-                            if (fact.type === 'contraindications') {
-                              return (
-                                <div
-                                  key={`fact-${fact.type}-${factIndex}`}
-                                  className="rounded-2xl border border-red-100 bg-white/80 p-3"
-                                >
-                                  <p className="font-semibold text-red-700">
-                                    Things to avoid for safety
-                                  </p>
-                                  <ul className="mt-2 space-y-1 text-sm">
-                                    {fact.data.map((group: any, idx: number) => (
-                                      <li key={`${group.condition}-${idx}`}>
-                                        <strong>{group.condition}:</strong>{' '}
-                                        {group.avoid.join(', ')}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              );
-                            }
+                              if (fact.type === 'contraindications') {
+                                return (
+                                  <div
+                                    key={`fact-${fact.type}-${factIndex}`}
+                                    className="rounded-2xl border border-red-100 bg-white/80 p-3"
+                                  >
+                                    <p className="font-semibold text-red-700">Things to avoid for safety</p>
+                                    <ul className="mt-2 space-y-1 text-sm">
+                                      {fact.data.map((group: any, idx: number) => (
+                                        <li key={`${group.condition}-${idx}`}>
+                                          <strong>{group.condition}:</strong> {group.avoid.join(', ')}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              }
 
-                            if (fact.type === 'safe_actions') {
-                              return (
-                                <div
-                                  key={`fact-${fact.type}-${factIndex}`}
-                                  className="rounded-2xl border border-mint-100 bg-white/80 p-3"
-                                >
-                                  <p className="font-semibold text-mint-700">
-                                    Generally safe self-care ideas
-                                  </p>
-                                  <ul className="mt-2 space-y-1 text-sm">
-                                    {fact.data.map((group: any, idx: number) => (
-                                      <li key={`${group.condition}-${idx}`}>
-                                        <strong>{group.condition}:</strong>{' '}
-                                        {group.actions.join(', ')}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              );
-                            }
+                              if (fact.type === 'safe_actions') {
+                                return (
+                                  <div
+                                    key={`fact-${fact.type}-${factIndex}`}
+                                    className="rounded-2xl border border-mint-100 bg-white/80 p-3"
+                                  >
+                                    <p className="font-semibold text-mint-700">Generally safe self-care ideas</p>
+                                    <ul className="mt-2 space-y-1 text-sm">
+                                      {fact.data.map((group: any, idx: number) => (
+                                        <li key={`${group.condition}-${idx}`}>
+                                          <strong>{group.condition}:</strong> {group.actions.join(', ')}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              }
 
-                            if (fact.type === 'providers') {
-                              return (
-                                <div
-                                  key={`fact-${fact.type}-${factIndex}`}
-                                  className="rounded-2xl border border-ocean-100 bg-white/80 p-3"
-                                >
-                                  <p className="font-semibold text-ocean-700">
-                                    Providers you might consider
-                                  </p>
-                                  <ul className="mt-2 space-y-1 text-sm">
-                                    {fact.data.map((provider: any, idx: number) => (
-                                      <li key={`${provider.provider}-${idx}`}>
-                                        <strong>{provider.provider}</strong>
-                                        {provider.mode ? ` • ${provider.mode}` : ''}
-                                        {provider.phone ? ` – ${provider.phone}` : ''}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              );
-                            }
+                              if (fact.type === 'providers') {
+                                return (
+                                  <div
+                                    key={`fact-${fact.type}-${factIndex}`}
+                                    className="rounded-2xl border border-ocean-100 bg-white/80 p-3"
+                                  >
+                                    <p className="font-semibold text-ocean-700">Providers you might consider</p>
+                                    <ul className="mt-2 space-y-1 text-sm">
+                                      {fact.data.map((provider: any, idx: number) => (
+                                        <li key={`${provider.provider}-${idx}`}>
+                                          <strong>{provider.provider}</strong>
+                                          {provider.mode ? ` - ${provider.mode}` : ''}
+                                          {provider.phone ? ` - ${provider.phone}` : ''}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              }
 
-                            if (fact.type === 'mental_health_crisis') {
-                              return (
-                                <div
-                                  key={`fact-${fact.type}-${factIndex}`}
-                                  className="rounded-2xl border border-purple-200 bg-white/80 p-3"
-                                >
-                                  <p className="font-semibold text-purple-700">
-                                    Mental health support steps
-                                  </p>
-                                  {fact.data.matched?.length > 0 && (
-                                    <p className="mt-1 text-xs text-purple-600/80">
-                                      Detected phrases: {fact.data.matched.join(', ')}
-                                    </p>
-                                  )}
-                                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                                    {fact.data.actions?.map((action: string, idx: number) => (
-                                      <li key={`${action}-${idx}`}>{action}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              );
-                            }
+                              if (fact.type === 'mental_health_crisis') {
+                                return (
+                                  <div
+                                    key={`fact-${fact.type}-${factIndex}`}
+                                    className="rounded-2xl border border-purple-200 bg-white/80 p-3"
+                                  >
+                                    <p className="font-semibold text-purple-700">Mental health support steps</p>
+                                    {fact.data.matched?.length > 0 && (
+                                      <p className="mt-1 text-xs text-purple-600/80">
+                                        Detected phrases: {fact.data.matched.join(', ')}
+                                      </p>
+                                    )}
+                                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                                      {fact.data.actions?.map((action: string, idx: number) => (
+                                        <li key={`${action}-${idx}`}>{action}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              }
 
-                            if (fact.type === 'pregnancy_alert') {
-                              return (
-                                <div
-                                  key={`fact-${fact.type}-${factIndex}`}
-                                  className="rounded-2xl border border-pink-200 bg-white/80 p-3"
-                                >
-                                  <p className="font-semibold text-pink-700">
-                                    Pregnancy-specific guidance
-                                  </p>
-                                  {fact.data.matched?.length > 0 && (
-                                    <p className="mt-1 text-xs text-pink-600/80">
-                                      Detected: {fact.data.matched.join(', ')}
-                                    </p>
-                                  )}
-                                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                                    {fact.data.guidance?.map((tip: string, idx: number) => (
-                                      <li key={`${tip}-${idx}`}>{tip}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              );
-                            }
+                              if (fact.type === 'pregnancy_alert') {
+                                return (
+                                  <div
+                                    key={`fact-${fact.type}-${factIndex}`}
+                                    className="rounded-2xl border border-pink-200 bg-white/80 p-3"
+                                  >
+                                    <p className="font-semibold text-pink-700">Pregnancy-specific guidance</p>
+                                    {fact.data.matched?.length > 0 && (
+                                      <p className="mt-1 text-xs text-pink-600/80">
+                                        Detected: {fact.data.matched.join(', ')}
+                                      </p>
+                                    )}
+                                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                                      {fact.data.guidance?.map((tip: string, idx: number) => (
+                                        <li key={`${tip}-${idx}`}>{tip}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              }
 
-                            if (fact.type === 'personalization') {
-                              return (
-                                <div
-                                  key={`fact-${fact.type}-${factIndex}`}
-                                  className="rounded-2xl border border-yellow-200 bg-white/80 p-3"
-                                >
-                                  <p className="font-semibold text-yellow-700">
-                                    Tailored notes
-                                  </p>
-                                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                                    {fact.data.map((note: string, idx: number) => (
-                                      <li key={`${note}-${idx}`}>{note}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              );
-                            }
+                              if (fact.type === 'personalization') {
+                                return (
+                                  <div
+                                    key={`fact-${fact.type}-${factIndex}`}
+                                    className="rounded-2xl border border-yellow-200 bg-white/80 p-3"
+                                  >
+                                    <p className="font-semibold text-yellow-700">Tailored notes</p>
+                                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                                      {fact.data.map((note: string, idx: number) => (
+                                        <li key={`${note}-${idx}`}>{note}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              }
 
-                            return null;
-                          })}
+                              return null;
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  ))}
 
-                {isLoading && <LoadingSkeleton count={1} />}
+                  {isLoading && <LoadingSkeleton count={1} />}
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
-              <div ref={messagesEndRef} />
             </div>
 
             <form
@@ -735,10 +702,8 @@ export default function Home() {
                     type="button"
                     onClick={isRecording ? stopRecording : startRecording}
                     className={`flex h-12 w-full items-center justify-center rounded-2xl border border-ocean-200 text-white shadow transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200 sm:w-12 ${
-                      isRecording
-                        ? 'animate-pulse bg-red-500 hover:bg-red-600'
-                        : 'bg-ocean-500 hover:bg-ocean-600'
-                    }`}
+                    isRecording ? 'animate-pulse bg-red-500 hover:bg-red-600' : 'bg-ocean-500 hover:bg-ocean-600'
+                  }`}
                     aria-pressed={isRecording}
                     aria-label={isRecording ? 'Stop recording' : 'Start voice recording'}
                   >
@@ -771,8 +736,8 @@ export default function Home() {
               </div>
             </form>
           </section>
-        </div>
-      </main>
+        </main>
+      </div>
 
       {showPreferences && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 backdrop-blur-sm">
@@ -792,8 +757,7 @@ export default function Home() {
             <header>
               <h2 className="text-2xl font-bold text-slate-800">Session preferences</h2>
               <p className="mt-2 text-sm text-slate-600">
-                Adjust how the assistant responds and update your health profile for more
-                tailored guidance.
+                Adjust how the assistant responds and update your health profile for more tailored guidance.
               </p>
             </header>
 
@@ -826,8 +790,7 @@ export default function Home() {
                   ))}
                 </select>
                 <p className="text-xs text-slate-500">
-                  Switching the language updates the assistant’s replies and placeholder
-                  prompts.
+                  Switching the language updates the assistant's replies and placeholder prompts.
                 </p>
                 <button
                   onClick={handleOpenProfileModal}
@@ -862,16 +825,14 @@ export default function Home() {
               </div>
               <div>
                 <h2 className="text-2xl font-bold text-slate-800">Emergency guidance</h2>
-                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                  Stay prepared
-                </p>
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Stay prepared</p>
               </div>
             </header>
 
             <div className="mt-6 space-y-4 text-sm leading-relaxed text-slate-600">
               <p>
-                This assistant can highlight red flags, but it cannot diagnose or provide
-                emergency care. Contact local services immediately if you notice:
+                This assistant can highlight red flags, but it cannot diagnose or provide emergency care. Contact local services
+                immediately if you notice:
               </p>
               <ul className="list-disc space-y-2 pl-5">
                 <li>Chest pain, shortness of breath, or sudden weakness.</li>
@@ -879,8 +840,7 @@ export default function Home() {
                 <li>Worsening symptoms after self-care guidance.</li>
               </ul>
               <p className="rounded-2xl border border-mint-200 bg-mint-50/70 p-4 text-mint-800">
-                Call your local emergency number (India: 108) or visit the nearest emergency
-                department for urgent concerns.
+                Call your local emergency number (India: 108) or visit the nearest emergency department for urgent concerns.
               </p>
               <button
                 onClick={() => window.open('tel:108')}
@@ -906,8 +866,7 @@ export default function Home() {
             </button>
             <h2 className="text-2xl font-bold text-slate-800">Health profile</h2>
             <p className="mt-2 text-sm text-slate-600">
-              Update basic details so I can tailor contextual guidance. Your information
-              stays on this device.
+              Update basic details so I can tailor contextual guidance. Your information stays on this device.
             </p>
 
             <div className="mt-6 space-y-4">
@@ -915,9 +874,7 @@ export default function Home() {
                 <input
                   type="checkbox"
                   checked={profile.diabetes}
-                  onChange={(event) =>
-                    setProfile((prev) => ({ ...prev, diabetes: event.target.checked }))
-                  }
+                  onChange={(event) => setProfile((prev) => ({ ...prev, diabetes: event.target.checked }))}
                   className="h-5 w-5 rounded border-ocean-200 text-ocean-500 focus:ring-ocean-300"
                 />
                 I have diabetes
@@ -927,9 +884,7 @@ export default function Home() {
                 <input
                   type="checkbox"
                   checked={profile.hypertension}
-                  onChange={(event) =>
-                    setProfile((prev) => ({ ...prev, hypertension: event.target.checked }))
-                  }
+                  onChange={(event) => setProfile((prev) => ({ ...prev, hypertension: event.target.checked }))}
                   className="h-5 w-5 rounded border-ocean-200 text-ocean-500 focus:ring-ocean-300"
                 />
                 I have hypertension
@@ -940,9 +895,7 @@ export default function Home() {
                   <input
                     type="checkbox"
                     checked={profile.pregnancy}
-                    onChange={(event) =>
-                      setProfile((prev) => ({ ...prev, pregnancy: event.target.checked }))
-                    }
+                    onChange={(event) => setProfile((prev) => ({ ...prev, pregnancy: event.target.checked }))}
                     className="h-5 w-5 rounded border-ocean-200 text-ocean-500 focus:ring-ocean-300"
                   />
                   I am currently pregnant
@@ -973,11 +926,8 @@ export default function Home() {
                     onChange={(event) =>
                       setProfile((prev) => ({
                         ...prev,
-                        sex: event.target.value
-                          ? (event.target.value as SexOption)
-                          : undefined,
-                        pregnancy:
-                          event.target.value === 'female' ? prev.pregnancy : false,
+                        sex: event.target.value ? (event.target.value as SexOption) : undefined,
+                        pregnancy: event.target.value === 'female' ? prev.pregnancy : false,
                       }))
                     }
                     className="w-full rounded-2xl border border-ocean-100 bg-white/80 px-4 py-2 text-slate-700 shadow-sm focus:border-ocean-300 focus:outline-none focus:ring-4 focus:ring-ocean-200/50"
@@ -991,15 +941,11 @@ export default function Home() {
               </div>
 
               <label className="space-y-2 text-sm text-slate-600">
-                <span className="block font-semibold text-slate-500">
-                  City (optional)
-                </span>
+                <span className="block font-semibold text-slate-500">City (optional)</span>
                 <input
                   type="text"
                   value={profile.city ?? ''}
-                  onChange={(event) =>
-                    setProfile((prev) => ({ ...prev, city: event.target.value }))
-                  }
+                  onChange={(event) => setProfile((prev) => ({ ...prev, city: event.target.value }))}
                   placeholder="e.g., Mumbai"
                   className="w-full rounded-2xl border border-ocean-100 bg-white/80 px-4 py-2 text-slate-700 shadow-sm focus:border-ocean-300 focus:outline-none focus:ring-4 focus:ring-ocean-200/50"
                 />
