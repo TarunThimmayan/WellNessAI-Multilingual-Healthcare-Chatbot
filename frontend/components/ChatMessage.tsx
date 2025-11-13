@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import clsx from "clsx";
@@ -38,15 +38,18 @@ interface ChatMessageProps {
 }
 
 function ChatMessage({ message, index }: ChatMessageProps) {
-  const formattedTime = useMemo(() => {
+  const [formattedTime, setFormattedTime] = useState<string>("");
+
+  useEffect(() => {
     try {
-      return new Intl.DateTimeFormat("en-US", {
+      const value = new Intl.DateTimeFormat("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
       }).format(new Date(message.timestamp));
+      setFormattedTime(value);
     } catch (error) {
-      return message.timestamp;
+      setFormattedTime(message.timestamp);
     }
   }, [message.timestamp]);
 
@@ -108,8 +111,9 @@ function ChatMessage({ message, index }: ChatMessageProps) {
               message.role === "assistant" ? "text-ocean-600/80" : "text-white/60"
             )}
             dateTime={message.timestamp}
+            suppressHydrationWarning
           >
-            {formattedTime}
+            {formattedTime || ""}
           </time>
         </footer>
 
