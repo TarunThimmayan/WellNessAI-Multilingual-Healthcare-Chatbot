@@ -180,3 +180,5 @@ prisma generate --schema prisma/schema.prisma
 
 The old SQLAlchemy code has been replaced with Prisma. All database operations are now async and use Prisma's type-safe API. The API endpoints remain the same, but the underlying database layer uses Prisma.
 
+
+

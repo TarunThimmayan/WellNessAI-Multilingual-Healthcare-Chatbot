@@ -184,3 +184,5 @@ prisma db push --schema prisma/schema.prisma
 5. **Auto-completion**: IDE support with auto-completion
 6. **Validation**: Automatic data validation
 
+
+

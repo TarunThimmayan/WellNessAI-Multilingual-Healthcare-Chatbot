@@ -19,9 +19,9 @@ interface ProfileCardProps {
 }
 
 const gradientMap: Record<string, string> = {
-  teal: "from-ocean-500 via-ocean-400 to-mint-400",
-  mint: "from-mint-500 via-mint-400 to-ocean-300",
-  blue: "from-sky-500 via-ocean-500 to-teal-500",
+  teal: "from-emerald-500 via-green-500 to-teal-500",
+  mint: "from-green-500 via-emerald-500 to-teal-500",
+  blue: "from-teal-500 via-green-500 to-emerald-500",
 };
 
 export default function ProfileCard({
@@ -39,23 +39,23 @@ export default function ProfileCard({
   if (loading) {
     return (
       <div
-        className="flex flex-col gap-3 rounded-2xl border border-white/40 bg-white/60 p-6 shadow backdrop-blur animate-pulse"
+        className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/60 p-6 shadow-[0_18px_45px_rgba(15,23,42,0.55)] backdrop-blur animate-pulse"
         aria-busy="true"
         aria-live="polite"
       >
-        <div className="h-4 w-1/2 rounded-full bg-slate-200" />
+        <div className="h-4 w-1/2 rounded-full bg-emerald-500/30" />
         <div className="flex gap-3">
-          <div className="h-10 w-10 rounded-full bg-slate-200" />
+          <div className="h-10 w-10 rounded-full bg-emerald-500/30" />
           <div className="flex-1 space-y-2">
-            <div className="h-4 w-1/3 rounded-full bg-slate-200" />
-            <div className="h-4 w-2/3 rounded-full bg-slate-200" />
+            <div className="h-4 w-1/3 rounded-full bg-emerald-500/30" />
+            <div className="h-4 w-2/3 rounded-full bg-emerald-500/30" />
           </div>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <div className="h-4 rounded-full bg-slate-200" />
-          <div className="h-4 rounded-full bg-slate-200" />
-          <div className="h-4 rounded-full bg-slate-200" />
-          <div className="h-4 rounded-full bg-slate-200" />
+          <div className="h-4 rounded-full bg-emerald-500/30" />
+          <div className="h-4 rounded-full bg-emerald-500/30" />
+          <div className="h-4 rounded-full bg-emerald-500/30" />
+          <div className="h-4 rounded-full bg-emerald-500/30" />
         </div>
       </div>
     );
@@ -63,20 +63,20 @@ export default function ProfileCard({
 
   return (
     <section
-      className="relative overflow-hidden rounded-3xl border border-white/50 bg-white/85 p-6 shadow-lg backdrop-blur transition"
+      className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950/60 p-6 shadow-[0_25px_60px_rgba(15,23,42,0.55)] backdrop-blur transition"
       aria-label="Profile summary"
     >
       <div
         className={clsx(
-          "absolute inset-y-0 right-0 w-[45%] opacity-70 blur-3xl",
+          "absolute inset-y-0 right-0 w-[45%] opacity-30 blur-3xl",
           `bg-gradient-to-br ${gradient}`
         )}
         aria-hidden
       />
-      <div className="relative flex items-center gap-4 border-b border-white/60 pb-5">
+      <div className="relative flex items-center gap-4 border-b border-white/10 pb-5">
         <div
           className={clsx(
-            "flex h-12 w-12 items-center justify-center rounded-full text-lg font-semibold text-white shadow-lg",
+            "flex h-12 w-12 items-center justify-center rounded-full text-lg font-semibold text-white shadow-[0_10px_30px_rgba(16,185,129,0.35)]",
             `bg-gradient-to-br ${gradient}`
           )}
           aria-hidden
@@ -85,19 +85,19 @@ export default function ProfileCard({
         </div>
         <div className="flex flex-1 flex-col">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
+            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-emerald-300/80">
               Health profile
             </p>
             {onEdit && (
               <button
                 onClick={onEdit}
-                className="rounded-full border border-white/70 bg-white/60 px-3.5 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-ocean-600 transition hover:border-ocean-200 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
+                className="rounded-full border border-emerald-400/40 bg-gradient-to-r from-emerald-500/20 via-green-500/15 to-teal-500/20 px-3.5 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-200 transition hover:border-emerald-400/60 hover:from-emerald-500/30 hover:via-green-500/25 hover:to-teal-500/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
               >
                 Update
               </button>
             )}
           </div>
-          <h2 className="mt-1 text-lg font-semibold text-slate-800">{name}</h2>
+          <h2 className="mt-1 text-lg font-semibold text-white">{name}</h2>
         </div>
       </div>
 
@@ -105,23 +105,23 @@ export default function ProfileCard({
         {stats.map((stat) => (
           <div
             key={stat.label}
-            className="flex h-full flex-col gap-2 rounded-2xl border border-white/60 bg-white/75 px-4 py-3 shadow-sm transition hover:border-ocean-100 hover:shadow-sm"
+            className="flex h-full flex-col gap-2 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 shadow-[0_12px_30px_rgba(15,23,42,0.45)] transition hover:border-emerald-400/30 hover:shadow-[0_18px_45px_rgba(16,185,129,0.18)]"
           >
-            <dt className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
+            <dt className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-emerald-300/70">
               {stat.icon && (
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ocean-50 text-ocean-500">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500/20 via-green-500/15 to-teal-500/20 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
                   {stat.icon}
                 </span>
               )}
               <span>{stat.label}</span>
             </dt>
-            <dd className="text-sm font-semibold text-slate-700">
+            <dd className="text-sm font-semibold text-slate-200">
               {stat.highlights && stat.highlights.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {stat.highlights.map((highlight) => (
                     <span
                       key={highlight}
-                      className="rounded-full bg-ocean-50 px-2.5 py-1 text-xs font-medium text-ocean-600"
+                      className="rounded-full bg-gradient-to-r from-emerald-500/20 via-green-500/15 to-teal-500/20 border border-emerald-400/30 px-2.5 py-1 text-xs font-medium text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.15)]"
                     >
                       {highlight}
                     </span>

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Check, Loader2, ShieldCheck, Sparkles, XCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { setAuth, type AuthUser } from '../../utils/auth';
 
 type ToastVariant = 'success' | 'error' | 'info';
 
@@ -22,7 +23,7 @@ const createId = () =>
 const softPalette = {
   background: 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950',
   card: 'bg-white/90 backdrop-blur-lg border border-white/70',
-  accent: 'from-teal-400 via-sky-400 to-blue-500',
+  accent: 'from-emerald-400 via-green-400 to-teal-500',
   focus: 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-300',
   textPrimary: 'text-slate-800',
   textSecondary: 'text-slate-500',
@@ -152,24 +153,50 @@ export default function AuthExperience() {
     setLoading(true);
     await simulateRequest();
     setLoading(false);
+    
+    // Set authentication state
+    const user: AuthUser = {
+      email: signUpForm.email,
+      fullName: signUpForm.fullName,
+      createdAt: new Date().toISOString(),
+    };
+    setAuth(user);
+    
     addToast('Welcome aboard! Your profile is ready.', 'success');
     setSignUpForm({ fullName: '', email: '', password: '', confirmPassword: '' });
-    router.push('/landing');
+    
+    // Redirect to main chat interface
+    setTimeout(() => {
+      router.push('/');
+    }, 500);
   };
 
   const handleLoginSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (loading) return;
     if (!validateLogin()) {
-      addToast('Let’s double-check your credentials.', 'error');
+      addToast("Let's double-check your credentials.", 'error');
       return;
     }
     setLoading(true);
     await simulateRequest();
     setLoading(false);
+    
+    // Set authentication state (in a real app, you'd get user data from the API)
+    const user: AuthUser = {
+      email: loginForm.email,
+      fullName: loginForm.email.split('@')[0], // Fallback name from email
+      createdAt: new Date().toISOString(),
+    };
+    setAuth(user);
+    
     addToast('You are safely signed in. How can we support you today?', 'success');
     setLoginForm((prev) => ({ ...prev, password: '' }));
-    router.push('/landing');
+    
+    // Redirect to main chat interface
+    setTimeout(() => {
+      router.push('/');
+    }, 500);
   };
 
   const renderToastIcon = (variant: ToastVariant) => {
@@ -179,9 +206,10 @@ export default function AuthExperience() {
   };
 
   return (
-    <div className={clsx('min-h-screen px-4 py-10 sm:px-8 md:px-12 lg:px-16', softPalette.background, 'text-slate-100')}
-    >
-      <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10">
+    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(16,185,129,0.55),transparent_55%),radial-gradient(circle_at_85%_5%,rgba(34,197,94,0.4),transparent_55%),linear-gradient(180deg,rgba(2,6,23,0.92),rgba(2,6,23,0.95))]" />
+      <div className="relative z-10 px-4 py-10 sm:px-8 md:px-12 lg:px-16">
+        <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10">
         <header className="flex w-full flex-col items-center gap-3 text-center">
           <div className="flex items-center gap-3 rounded-full border border-white/20 bg-white/10 px-5 py-2 text-sm font-semibold uppercase tracking-[0.32em] text-teal-100 shadow-lg shadow-teal-500/10">
             <ShieldCheck className="h-4 w-4" aria-hidden />
@@ -197,14 +225,14 @@ export default function AuthExperience() {
 
         <main className="relative w-full">
           <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-white/10 shadow-[0_35px_120px_rgba(15,23,42,0.55)]">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_55%),radial-gradient(circle_at_bottom,_rgba(45,212,191,0.12),_transparent_55%)]" aria-hidden />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.12),_transparent_55%),radial-gradient(circle_at_bottom,_rgba(34,197,94,0.12),_transparent_55%)]" aria-hidden />
             <div className="relative grid gap-0 md:grid-cols-2">
               <section className="hidden md:flex flex-col justify-between border-r border-white/10 bg-white/10 p-10 text-slate-100">
                 <div className="space-y-6">
                   <p className="text-sm uppercase tracking-[0.28em] text-teal-100/80">Why people choose us</p>
                   <ul className="space-y-4 text-sm text-slate-200">
                     <li className="flex items-start gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 text-slate-900 shadow-lg shadow-teal-500/30">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 via-green-400 to-teal-500 text-slate-900 shadow-lg shadow-emerald-500/30">
                         <Sparkles className="h-4 w-4" aria-hidden />
                       </div>
                       <div>
@@ -213,7 +241,7 @@ export default function AuthExperience() {
                       </div>
                     </li>
                     <li className="flex items-start gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 via-teal-400 to-emerald-400 text-slate-900 shadow-lg shadow-sky-500/30">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-green-400 via-emerald-400 to-teal-400 text-slate-900 shadow-lg shadow-green-500/30">
                         <ShieldCheck className="h-4 w-4" aria-hidden />
                       </div>
                       <div>
@@ -222,7 +250,7 @@ export default function AuthExperience() {
                       </div>
                     </li>
                     <li className="flex items-start gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 via-sky-400 to-teal-500 text-slate-900 shadow-lg shadow-emerald-500/30">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 via-green-400 to-teal-500 text-slate-900 shadow-lg shadow-emerald-500/30">
                         <Check className="h-4 w-4" aria-hidden />
                       </div>
                       <div>
@@ -252,7 +280,7 @@ export default function AuthExperience() {
                   </button>
                 </div>
 
-                <div className="relative min-h-[420px] overflow-hidden">
+                <div className="relative min-h-[520px] overflow-y-auto overflow-x-hidden">
                   <div
                     className={clsx(
                       'absolute inset-0 transition-all duration-500 ease-out',
@@ -301,31 +329,29 @@ export default function AuthExperience() {
                           placeholder="Re-enter your password"
                           error={errors.confirmPassword}
                         />
-
-                        <div className="pt-4">
-                          <button
-                            type="submit"
-                            disabled={loading}
-                            className={clsx(
-                              'group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-teal-500/40 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60',
-                              'from-teal-400 via-sky-400 to-blue-500'
-                            )}
-                            ref={signUpButtonRef}
-                          >
-                            {loading ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                                Creating your profile…
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-4 w-4" aria-hidden />
-                                Sign up securely
-                              </>
-                            )}
-                          </button>
-                        </div>
                       </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className={clsx(
+                          'group relative flex w-full items-center justify-center gap-3 rounded-lg bg-gradient-to-r px-8 py-5 text-lg font-bold text-white shadow-lg shadow-emerald-500/40 transition hover:scale-[1.01] hover:shadow-xl hover:shadow-emerald-500/50 disabled:cursor-not-allowed disabled:opacity-60',
+                          'from-emerald-500 via-green-500 to-teal-500'
+                        )}
+                        ref={signUpButtonRef}
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
+                            <span>Signing up...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-6 w-6" aria-hidden />
+                            <span>Sign up</span>
+                          </>
+                        )}
+                      </button>
                     </form>
                   </div>
 
@@ -363,13 +389,13 @@ export default function AuthExperience() {
                             type="checkbox"
                             checked={loginForm.remember}
                             onChange={(event) => handleLoginChange('remember', event.target.checked)}
-                            className="h-4 w-4 rounded border-slate-500 bg-transparent text-teal-400 focus:ring-teal-300"
+                            className="h-4 w-4 rounded border-slate-500 bg-transparent text-emerald-400 focus:ring-emerald-300"
                           />
                           Remember me on this device
                         </label>
                         <button
                           type="button"
-                          className="text-sm font-semibold text-teal-200 transition hover:text-white"
+                          className="text-sm font-semibold text-emerald-200 transition hover:text-white"
                         >
                           Forgot password?
                         </button>
@@ -379,19 +405,19 @@ export default function AuthExperience() {
                         type="submit"
                         disabled={loading}
                         className={clsx(
-                          'group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60',
-                          'from-sky-500 via-blue-500 to-teal-500'
+                          'group relative mt-6 flex w-full items-center justify-center gap-3 rounded-lg bg-gradient-to-r px-8 py-5 text-lg font-bold text-white shadow-lg shadow-emerald-500/40 transition hover:scale-[1.01] hover:shadow-xl hover:shadow-emerald-500/50 disabled:cursor-not-allowed disabled:opacity-60',
+                          'from-emerald-500 via-green-500 to-teal-500'
                         )}
                       >
                         {loading ? (
                           <>
-                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                            Checking your credentials…
+                            <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
+                            <span>Signing in...</span>
                           </>
                         ) : (
                           <>
-                            <ShieldCheck className="h-4 w-4" aria-hidden />
-                            Log me in safely
+                            <ShieldCheck className="h-6 w-6" aria-hidden />
+                            <span>Sign in</span>
                           </>
                         )}
                       </button>
@@ -431,6 +457,7 @@ export default function AuthExperience() {
             </div>
           </div>
         </main>
+        </div>
       </div>
 
       <ToastContainer toasts={toasts} renderIcon={renderToastIcon} />
@@ -524,7 +551,7 @@ function PasswordStrengthBar({ score, password }: PasswordStrengthBarProps) {
               'h-2 flex-1 rounded-full transition-all duration-200',
               index < activeSegments
                 ? index >= 3
-                  ? 'bg-gradient-to-r from-emerald-300 via-teal-300 to-sky-300'
+                  ? 'bg-gradient-to-r from-emerald-300 via-green-300 to-teal-300'
                   : 'bg-gradient-to-r from-amber-300 via-orange-300 to-rose-300'
                 : 'bg-slate-600'
             )}
@@ -550,10 +577,10 @@ function ToastContainer({ toasts, renderIcon }: ToastContainerProps) {
             'pointer-events-auto flex items-center gap-3 rounded-2xl border border-white/20 bg-white/90 px-4 py-3 text-sm font-medium shadow-lg shadow-slate-900/30 backdrop-blur',
             toast.variant === 'success' && 'text-emerald-700',
             toast.variant === 'error' && 'text-rose-700',
-            toast.variant === 'info' && 'text-sky-700'
+            toast.variant === 'info' && 'text-emerald-700'
           )}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 text-white shadow-lg shadow-teal-400/30">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 via-green-400 to-teal-500 text-white shadow-lg shadow-emerald-400/30">
             {renderIcon(toast.variant)}
           </span>
           <p className="flex-1 text-left text-sm leading-relaxed">{toast.message}</p>

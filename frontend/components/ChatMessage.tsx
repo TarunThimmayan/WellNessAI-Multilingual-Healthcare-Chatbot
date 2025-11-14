@@ -56,7 +56,7 @@ const CodeBlock = ({ className, children }: CodeBlockProps) => {
         <button
           type="button"
           onClick={handleCopy}
-          className="rounded-full border border-white/10 px-3 py-1 text-[0.65rem] font-semibold tracking-[0.28em] text-slate-300 transition group-hover:border-pink-300/60 group-hover:text-pink-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+          className="rounded-full border border-white/10 px-3 py-1 text-[0.65rem] font-semibold tracking-[0.28em] text-slate-300 transition group-hover:border-emerald-300/60 group-hover:text-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
         >
           {copied ? "Copied" : "Copy"}
         </button>
@@ -96,7 +96,7 @@ export interface ChatMessageModel {
 
 const roleStyles: Record<ChatRole, string> = {
   user:
-    "border border-transparent bg-gradient-to-br from-pink-500 via-fuchsia-500 to-purple-500 text-white shadow-[0_25px_70px_rgba(236,72,153,0.30)]",
+    "border border-transparent bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500 text-white shadow-[0_25px_70px_rgba(16,185,129,0.30)]",
   assistant:
     "border border-white/10 bg-slate-950/70 backdrop-blur text-slate-100 shadow-[0_30px_85px_rgba(15,23,42,0.55)]",
 };
@@ -108,9 +108,9 @@ const alignment: Record<ChatRole, string> = {
 
 const avatarStyles: Record<ChatRole, string> = {
   user:
-    "bg-gradient-to-br from-fuchsia-500/80 via-pink-500/90 to-purple-500 shadow-[0_10px_30px_rgba(236,72,153,0.45)] text-white",
+    "bg-gradient-to-br from-green-500/80 via-emerald-500/90 to-teal-500 shadow-[0_10px_30px_rgba(16,185,129,0.45)] text-white",
   assistant:
-    "bg-slate-900/80 backdrop-blur border border-white/10 text-pink-200 shadow-[0_12px_35px_rgba(15,23,42,0.45)]",
+    "bg-slate-900/80 backdrop-blur border border-white/10 text-emerald-200 shadow-[0_12px_35px_rgba(15,23,42,0.45)]",
 };
 
 const avatarLabel: Record<ChatRole, string> = {
@@ -121,10 +121,9 @@ const avatarLabel: Record<ChatRole, string> = {
 interface ChatMessageProps {
   message: ChatMessageModel;
   index: number;
-  isHighlighted?: boolean;
 }
 
-function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps) {
+function ChatMessage({ message, index }: ChatMessageProps) {
   const [formattedTime, setFormattedTime] = useState<string>("");
   const [copiedCitationKey, setCopiedCitationKey] = useState<string | null>(null);
   const citationCopyTimeoutRef = useRef<number | null>(null);
@@ -133,7 +132,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
     a: ({ children, className, ...props }) => (
       <a
         className={clsx(
-          "font-semibold text-pink-200 underline decoration-pink-200/30 underline-offset-4 transition hover:text-pink-100",
+          "font-semibold text-emerald-200 underline decoration-emerald-200/30 underline-offset-4 transition hover:text-emerald-100",
           className
         )}
         target="_blank"
@@ -146,7 +145,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
     li: ({ children, className, ...props }) => (
       <li
         className={clsx(
-          "[&_a]:text-pink-200 [&_a:hover]:text-pink-100 marker:text-pink-300",
+          "[&_a]:text-emerald-200 [&_a:hover]:text-emerald-100 marker:text-emerald-300",
           className
         )}
         {...props}
@@ -179,7 +178,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
     blockquote: ({ children, className, ...props }) => (
       <blockquote
         className={clsx(
-          "my-4 border-l-4 border-pink-400/60 bg-white/5 px-4 py-2 italic text-pink-100/90",
+          "my-4 border-l-4 border-emerald-400/60 bg-white/5 px-4 py-2 italic text-emerald-100/90",
           className
         )}
         {...props}
@@ -192,7 +191,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
         return (
           <code
             className={clsx(
-              "rounded bg-white/10 px-1.5 py-0.5 font-medium text-pink-100",
+              "rounded bg-white/10 px-1.5 py-0.5 font-medium text-emerald-100",
               className
             )}
             {...props}
@@ -208,7 +207,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
       <div className="my-4 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/70">
         <table
           className={clsx(
-            "w-full border-collapse text-sm text-slate-100 [&_th]:bg-white/5 [&_th]:text-left [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.2em] [&_th]:text-pink-200/80 [&_td]:border-t [&_td]:border-white/10 [&_td]:px-4 [&_td]:py-3 [&_th]:px-4 [&_th]:py-3",
+            "w-full border-collapse text-sm text-slate-100 [&_th]:bg-white/5 [&_th]:text-left [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.2em] [&_th]:text-emerald-200/80 [&_td]:border-t [&_td]:border-white/10 [&_td]:px-4 [&_td]:py-3 [&_th]:px-4 [&_th]:py-3",
             className
           )}
           {...props}
@@ -253,7 +252,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
     h4: ({ children, className, ...props }) => (
       <h4
         className={clsx(
-          "mb-2 mt-4 text-base font-semibold uppercase tracking-[0.28em] text-pink-200",
+          "mb-2 mt-4 text-base font-semibold uppercase tracking-[0.28em] text-emerald-200",
           className
         )}
         {...props}
@@ -362,7 +361,6 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
       aria-live="polite"
       role="listitem"
       data-message-role={message.role}
-      data-message-id={message.id}
       data-testid={`chat-message-${index}`}
     >
       {message.role === "assistant" && (
@@ -378,12 +376,11 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
       )}
       <div
         className={clsx(
-          "relative max-w-[90%] rounded-[26px] px-5 py-4 md:px-6 md:py-5 transition-all outline-none focus-visible:ring-4 focus-visible:ring-pink-400/40",
+          "relative max-w-[90%] rounded-[26px] px-5 py-4 md:px-6 md:py-5 transition-all outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/40",
           roleStyles[message.role],
           message.role === "assistant"
-            ? "[&::before]:pointer-events-none [&::before]:absolute [&::before]:inset-0 [&::before]:-mt-10 [&::before]:rounded-[32px] [&::before]:bg-gradient-to-br [&::before]:from-pink-500/10 [&::before]:to-transparent [&::before]:opacity-0 [&::before]:transition-opacity hover:[&::before]:opacity-100"
-            : "",
-          isHighlighted ? "ring-2 ring-pink-300/70 shadow-[0_0_45px_rgba(236,72,153,0.45)]" : ""
+            ? "[&::before]:pointer-events-none [&::before]:absolute [&::before]:inset-0 [&::before]:-mt-10 [&::before]:rounded-[32px] [&::before]:bg-gradient-to-br [&::before]:from-emerald-500/10 [&::before]:to-transparent [&::before]:opacity-0 [&::before]:transition-opacity hover:[&::before]:opacity-100"
+            : ""
         )}
         tabIndex={0}
       >
@@ -391,18 +388,18 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
           <span
             className={clsx(
               "flex items-center gap-2 font-semibold",
-              message.role === "assistant" ? "text-pink-200/80" : "text-white/80"
+              message.role === "assistant" ? "text-emerald-200/80" : "text-white/80"
             )}
           >
             {message.role === "assistant" && (
-              <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-pink-300" aria-hidden />
+              <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-emerald-300" aria-hidden />
             )}
             {avatarLabel[message.role]}
           </span>
           <time
             className={clsx(
               "font-medium",
-              message.role === "assistant" ? "text-pink-200/70" : "text-white/70"
+              message.role === "assistant" ? "text-emerald-200/70" : "text-white/70"
             )}
             dateTime={message.timestamp}
             suppressHydrationWarning
@@ -414,8 +411,8 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
           className={clsx(
             "prose prose-sm md:prose-base max-w-none break-words leading-relaxed",
             message.role === "user"
-              ? "prose-invert text-white [&_a]:text-pink-200"
-              : "prose-invert text-slate-100 [&_code]:rounded [&_code]:bg-white/10 [&_code]:px-1.5 [&_code]:py-0.5 [&_a]:text-pink-200 [&_a:hover]:text-pink-100"
+              ? "prose-invert text-white [&_a]:text-emerald-200"
+              : "prose-invert text-slate-100 [&_code]:rounded [&_code]:bg-white/10 [&_code]:px-1.5 [&_code]:py-0.5 [&_a]:text-emerald-200 [&_a:hover]:text-emerald-100"
           )}
         >
           <ReactMarkdown
@@ -429,7 +426,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
 
         {message.citations && message.citations.length > 0 && (
           <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-sm text-slate-100 shadow-[0_18px_45px_rgba(15,23,42,0.55)]">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.32em] text-pink-200/80">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.32em] text-emerald-200/80">
               Sources
             </p>
             <div className="space-y-3">
@@ -466,7 +463,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
                         <button
                           type="button"
                           onClick={() => handleCopyCitation(citation, idx)}
-                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-pink-300/60 hover:text-pink-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-emerald-300/60 hover:text-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
                         >
                           {copiedCitationKey === key ? (
                             <Check className="h-4 w-4" aria-hidden />
@@ -480,7 +477,7 @@ function ChatMessage({ message, index, isHighlighted = false }: ChatMessageProps
                             href={citation.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 rounded-full border border-transparent bg-gradient-to-r from-pink-500 via-fuchsia-500 to-purple-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_30px_rgba(236,72,153,0.35)] transition hover:scale-[1.02] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                            className="inline-flex items-center gap-2 rounded-full border border-transparent bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_30px_rgba(16,185,129,0.35)] transition hover:scale-[1.02] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
                           >
                             <ExternalLink className="h-4 w-4" aria-hidden />
                             Open

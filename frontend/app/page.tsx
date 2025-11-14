@@ -2,18 +2,16 @@
 
 import clsx from 'clsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import axios from 'axios';
+import { isAuthenticated } from '../utils/auth';
 import {
   AlertTriangle,
   Check,
-  Download,
   HeartPulse,
-  History,
   Menu,
   Mic,
   Phone,
-  Plus,
-  Search,
   SendHorizonal,
   Settings,
   Share2,
@@ -120,19 +118,6 @@ interface ChatEntry extends ChatMessageModel {
   safety?: any;
 }
 
-interface ChatSession {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  messages: ChatEntry[];
-}
-
-const HISTORY_STORAGE_KEY = 'wellness-care-sessions.v1';
-
-const cloneEntries = (entries: ChatEntry[]): ChatEntry[] =>
-  entries.map((entry) => ({ ...entry }));
-
 const defaultProfile: Profile = {
   diabetes: false,
   hypertension: false,
@@ -152,61 +137,47 @@ const createId = () =>
 const formatTimestamp = () => new Date().toISOString();
 
 export default function Home() {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChatEntry[]>([]);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const [lang, setLang] = useState<LangCode>('en');
   const [showProfile, setShowProfile] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showSafety, setShowSafety] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
   const [profile, setProfile] = useState<Profile>(defaultProfile);
   const [profileLoading, setProfileLoading] = useState(true);
   const [hasInteracted, setHasInteracted] = useState(false);
-  const [isHydrated, setIsHydrated] = useState(false);
-  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
+  // All refs must be declared before any conditional returns
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const shareFeedbackTimeoutRef = useRef<number | null>(null);
 
-  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
-
-  const createSession = useCallback((): ChatSession => {
-    const timestamp = formatTimestamp();
-    return {
-      id: createId(),
-      title: 'New care session',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      messages: [],
-    };
-  }, []);
-
-  const deriveSessionTitle = useCallback((entries: ChatEntry[], fallback = 'New care session') => {
-    const firstUser =
-      entries.find((entry) => entry.role === 'user' && entry.content && entry.content.trim().length > 0) ?? null;
-    if (!firstUser) {
-      return fallback;
-    }
-    const normalized = firstUser.content.replace(/\s+/g, ' ').trim();
-    return normalized.length > 56 ? `${normalized.slice(0, 56)}…` : normalized;
-  }, []);
-
+  // All useMemo hooks must be before conditional returns
   const quickSuggestionPrompts = useMemo(() => {
     return TOPIC_CATEGORIES.flatMap((category) => category.suggestions.map((suggestion) => suggestion.prompt)).slice(0, 6);
   }, []);
 
   const currentLanguage =
     LANGUAGE_OPTIONS.find((option) => option.value === lang) ?? LANGUAGE_OPTIONS[0];
+
+  // Check authentication on mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      router.push('/landing');
+    } else {
+      setIsAuthChecked(true);
+    }
+  }, [router]);
 
   useEffect(() => {
     const saved = localStorage.getItem('healthProfile');
@@ -221,44 +192,6 @@ export default function Home() {
     }
     setProfileLoading(false);
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    try {
-      const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as ChatSession[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const nextSessions = parsed.map((session) => ({
-            ...session,
-            messages: session.messages ? cloneEntries(session.messages) : [],
-          }));
-          setSessions(nextSessions);
-          setActiveSessionId(nextSessions[0].id);
-          setMessages(cloneEntries(nextSessions[0].messages ?? []));
-          setHasInteracted(nextSessions[0].messages?.some((entry) => entry.role === 'assistant') ?? false);
-        } else {
-          const session = createSession();
-          setSessions([session]);
-          setActiveSessionId(session.id);
-        }
-      } else {
-        const session = createSession();
-        setSessions([session]);
-        setActiveSessionId(session.id);
-      }
-    } catch (loadError) {
-      console.warn('Unable to load saved sessions', loadError);
-      const session = createSession();
-      setSessions([session]);
-      setActiveSessionId(session.id);
-    } finally {
-      setSearchQuery('');
-      setTimeout(() => setIsHydrated(true), 0);
-    }
-  }, [createSession]);
 
   useEffect(() => {
     localStorage.setItem('healthProfile', JSON.stringify(profile));
@@ -286,48 +219,6 @@ export default function Home() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!isHydrated || !activeSessionId) {
-      return;
-    }
-    setSessions((prevSessions) => {
-      const timestamp = formatTimestamp();
-      let found = false;
-      const updated = prevSessions.map((session) => {
-        if (session.id === activeSessionId) {
-          found = true;
-          return {
-            ...session,
-            title: deriveSessionTitle(messages, session.title),
-            updatedAt: timestamp,
-            messages: cloneEntries(messages),
-          };
-        }
-        return session;
-      });
-
-      if (!found) {
-        updated.push({
-          id: activeSessionId,
-          title: deriveSessionTitle(messages),
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          messages: cloneEntries(messages),
-        });
-      }
-
-      updated.sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
-      }
-
-      return updated;
-    });
-  }, [messages, activeSessionId, isHydrated, deriveSessionTitle]);
 
   const profileStats = useMemo(() => {
     const chronicConditions = [
@@ -373,7 +264,8 @@ export default function Home() {
   const avatarColor: 'teal' | 'mint' | 'blue' =
     profile.diabetes || profile.hypertension ? 'blue' : 'teal';
 
-  const handleSend = async (overrides?: string) => {
+  // Define handleSend before useCallback hooks that depend on it
+  const handleSend = useCallback(async (overrides?: string) => {
     const messageText = (overrides ?? inputValue).trim();
     if (!messageText || isLoading) return;
 
@@ -434,7 +326,144 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [inputValue, isLoading, lang, profile]);
+
+  const handleDismissError = useCallback(() => {
+    setError(null);
+  }, []);
+
+  const scheduleShareFeedback = useCallback((message: string | null, duration = 3200) => {
+    if (shareFeedbackTimeoutRef.current) {
+      clearTimeout(shareFeedbackTimeoutRef.current);
+      shareFeedbackTimeoutRef.current = null;
+    }
+    setShareFeedback(message);
+    if (message) {
+      shareFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setShareFeedback(null);
+        shareFeedbackTimeoutRef.current = null;
+      }, duration);
+    }
+  }, []);
+
+  const handleQuickPrompt = useCallback(
+    (prompt: string) => {
+      void handleSend(prompt);
+    },
+    [handleSend]
+  );
+
+  const handleShareConversation = useCallback(async () => {
+    if (typeof navigator === 'undefined') {
+      scheduleShareFeedback('Sharing is unavailable in this environment.');
+      return;
+    }
+    const conversation = messages
+      .filter((entry) => entry.content.trim().length > 0)
+      .map((entry) => `${entry.role === 'assistant' ? 'Care Guide' : 'You'}: ${entry.content.trim()}`)
+      .join('\n\n');
+
+    if (!conversation) {
+      scheduleShareFeedback('Start a conversation to share the session.');
+      return;
+    }
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Health Companion Conversation',
+          text: conversation,
+        });
+        scheduleShareFeedback('Conversation shared successfully.');
+      } else {
+        await navigator.clipboard.writeText(conversation);
+        scheduleShareFeedback('Conversation copied to clipboard.');
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        console.error('Share error', err);
+        scheduleShareFeedback('Unable to share conversation.');
+      }
+    }
+  }, [messages, scheduleShareFeedback]);
+
+  const sidebarClasses = useMemo(
+    () =>
+      clsx(
+        'fixed inset-y-0 left-0 z-40 flex w-72 flex-col gap-6 overflow-y-auto border-r border-white/10 bg-slate-900/60 px-6 py-8 shadow-[0_0_60px_rgba(16,185,129,0.18)] transition-transform duration-300 backdrop-blur-xl lg:z-30 lg:bg-slate-900/50 lg:shadow-none',
+        isSidebarOpen ? 'translate-x-0 lg:translate-x-0' : '-translate-x-full lg:-translate-x-full'
+      ),
+    [isSidebarOpen]
+  );
+
+  const mainLayoutClasses = useMemo(
+    () =>
+      clsx(
+        'flex min-h-screen flex-col transition-[margin] duration-300',
+        isSidebarOpen ? 'lg:ml-72' : 'lg:ml-16',
+        'px-0 sm:px-0'
+      ),
+    [isSidebarOpen]
+  );
+
+  const bottomBarClasses = useMemo(
+    () =>
+      clsx(
+        'fixed bottom-0 left-0 right-0 z-40 px-4 pb-6 pt-3 sm:px-6 lg:px-10 transition-[left] duration-300',
+        isSidebarOpen ? 'lg:left-72' : 'lg:left-16'
+      ),
+    [isSidebarOpen]
+  );
+
+  const collapseRailClasses = useMemo(
+    () =>
+      clsx(
+        'fixed inset-y-0 left-0 z-30 hidden w-16 flex-col items-center justify-between border-r border-white/10 bg-slate-900/60 px-2 py-6 shadow-[0_0_40px_rgba(16,185,129,0.18)] transition-transform duration-300 backdrop-blur-xl lg:flex',
+        isSidebarOpen ? '-translate-x-full opacity-0 pointer-events-none' : 'translate-x-0 opacity-100'
+      ),
+    [isSidebarOpen]
+  );
+
+  const transcribeAudio = useCallback(async (audioBlob: Blob) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', audioBlob, 'voice-note.webm');
+
+      const response = await axios.post(`${API_BASE}/stt`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const text: string = response.data.text;
+      if (text) {
+        setInputValue(text);
+        await handleSend(text);
+      }
+    } catch (err) {
+      console.error('Transcription error', err);
+      setError(
+        'Speech recognition did not succeed. You can continue by typing your question.'
+      );
+    }
+  }, [handleSend]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const media = window.matchMedia('(min-width: 1024px)');
+    const handleChange = () => {
+      setIsDesktop(media.matches);
+      setIsSidebarOpen(media.matches);
+    };
+    handleChange();
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, []);
+
+  // Don't render anything until auth check is complete
+  if (!isAuthChecked) {
+    return null;
+  }
 
   const startRecording = async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
@@ -473,28 +502,6 @@ export default function Home() {
     }
   };
 
-  const transcribeAudio = async (audioBlob: Blob) => {
-    try {
-      const formData = new FormData();
-      formData.append('file', audioBlob, 'voice-note.webm');
-
-      const response = await axios.post(`${API_BASE}/stt`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-
-      const text: string = response.data.text;
-      if (text) {
-        setInputValue(text);
-        await handleSend(text);
-      }
-    } catch (err) {
-      console.error('Transcription error', err);
-      setError(
-        'Speech recognition did not succeed. You can continue by typing your question.'
-      );
-    }
-  };
-
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -509,219 +516,9 @@ export default function Home() {
     setShowProfile(true);
   };
 
-  const handleDismissError = useCallback(() => {
-    setError(null);
-  }, []);
-
-  const scheduleShareFeedback = useCallback((message: string | null, duration = 3200) => {
-    if (shareFeedbackTimeoutRef.current) {
-      clearTimeout(shareFeedbackTimeoutRef.current);
-      shareFeedbackTimeoutRef.current = null;
-    }
-    setShareFeedback(message);
-    if (message) {
-      shareFeedbackTimeoutRef.current = window.setTimeout(() => {
-        setShareFeedback(null);
-        shareFeedbackTimeoutRef.current = null;
-      }, duration);
-    }
-  }, []);
-
-  const handleQuickPrompt = useCallback(
-    (prompt: string) => {
-      void handleSend(prompt);
-    },
-    [handleSend]
-  );
-
-  const handleNewSession = useCallback(() => {
-    const session = createSession();
-    setSessions((prev) => {
-      const next = [session, ...prev];
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next));
-      }
-      return next;
-    });
-    setActiveSessionId(session.id);
-    setMessages([]);
-    setHasInteracted(false);
-    setError(null);
-    setSearchQuery('');
-    if (!isDesktop) {
-      setIsSidebarOpen(false);
-      setIsHistoryExpanded(false);
-    }
-  }, [createSession, isDesktop]);
-
-  const handleSelectSession = useCallback(
-    (sessionId: string) => {
-      const session = sessions.find((entry) => entry.id === sessionId);
-      if (!session) {
-        return;
-      }
-      setActiveSessionId(sessionId);
-      setMessages(cloneEntries(session.messages ?? []));
-      setHasInteracted(session.messages?.some((entry) => entry.role === 'assistant') ?? false);
-      setError(null);
-      setSearchQuery('');
-      if (!isDesktop) {
-        setIsSidebarOpen(false);
-        setIsHistoryExpanded(false);
-      }
-    },
-    [sessions, isDesktop]
-  );
-
-  const handleExportConversation = useCallback(() => {
-    if (messages.length === 0) {
-      scheduleShareFeedback('No conversation to export yet.');
-      return;
-    }
-    try {
-      const payload = {
-        sessionId: activeSessionId,
-        exportedAt: formatTimestamp(),
-        profileSnapshot: profile,
-        messages,
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json',
-      });
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      anchor.href = url;
-      anchor.download = `wellness-session-${timestamp}.json`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      window.URL.revokeObjectURL(url);
-      scheduleShareFeedback('Conversation exported.');
-    } catch (exportError) {
-      console.error('Export error', exportError);
-      scheduleShareFeedback('Unable to export conversation.');
-    }
-  }, [messages, activeSessionId, profile, scheduleShareFeedback]);
-
-  const toggleHistory = useCallback(() => {
-    setIsHistoryExpanded((prev) => !prev);
-  }, []);
-
-  const handleShareConversation = useCallback(async () => {
-    if (typeof navigator === 'undefined') {
-      scheduleShareFeedback('Sharing is unavailable in this environment.');
-      return;
-    }
-    const conversation = messages
-      .filter((entry) => entry.content.trim().length > 0)
-      .map((entry) => `${entry.role === 'assistant' ? 'Care Guide' : 'You'}: ${entry.content.trim()}`)
-      .join('\n\n');
-
-    if (!conversation) {
-      scheduleShareFeedback('Start a conversation to share the session.');
-      return;
-    }
-
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: 'WellNess care session',
-          text: conversation,
-        });
-        scheduleShareFeedback('Sharing sheet opened.');
-      } else if (navigator.clipboard) {
-        await navigator.clipboard.writeText(conversation);
-        scheduleShareFeedback('Conversation copied to clipboard.');
-      } else {
-        scheduleShareFeedback('Sharing is not supported in this browser.');
-      }
-    } catch (error) {
-      if ((error as Error).name === 'AbortError') {
-        scheduleShareFeedback('Share cancelled.');
-      } else {
-        console.error('Share error', error);
-        scheduleShareFeedback('Unable to share right now.');
-      }
-    }
-  }, [messages, scheduleShareFeedback]);
-
-  const sidebarClasses = useMemo(
-    () =>
-      clsx(
-        'fixed inset-y-0 left-0 z-40 flex w-72 flex-col gap-6 overflow-y-auto border-r border-white/10 bg-slate-900/60 px-6 py-8 shadow-[0_0_60px_rgba(236,72,153,0.18)] transition-transform duration-300 backdrop-blur-xl lg:z-30 lg:bg-slate-900/50 lg:shadow-none',
-        isSidebarOpen ? 'translate-x-0 lg:translate-x-0' : '-translate-x-full lg:-translate-x-full'
-      ),
-    [isSidebarOpen]
-  );
-
-  const mainLayoutClasses = useMemo(
-    () =>
-      clsx(
-        'flex min-h-screen flex-col transition-[margin] duration-300',
-        isSidebarOpen ? 'lg:ml-72' : 'lg:ml-16',
-        'px-0 sm:px-0'
-      ),
-    [isSidebarOpen]
-  );
-
-  const bottomBarClasses = useMemo(
-    () =>
-      clsx(
-        'fixed bottom-0 left-0 right-0 z-40 px-4 pb-6 pt-3 sm:px-6 lg:px-10 transition-[left] duration-300',
-        isSidebarOpen ? 'lg:left-72' : 'lg:left-16'
-      ),
-    [isSidebarOpen]
-  );
-
-  const collapseRailClasses = useMemo(
-    () =>
-      clsx(
-        'fixed inset-y-0 left-0 z-30 hidden w-16 flex-col items-center justify-between border-r border-white/10 bg-slate-900/60 px-2 py-6 shadow-[0_0_40px_rgba(236,72,153,0.18)] transition-transform duration-300 backdrop-blur-xl lg:flex',
-        isSidebarOpen ? '-translate-x-full opacity-0 pointer-events-none' : 'translate-x-0 opacity-100'
-      ),
-    [isSidebarOpen]
-  );
-
-  const activeSession = useMemo(
-    () => sessions.find((session) => session.id === activeSessionId) ?? null,
-    [sessions, activeSessionId]
-  );
-
-  const normalizedSearch = searchQuery.trim().toLowerCase();
-
-  const filteredMessages = useMemo(() => {
-    if (!normalizedSearch) {
-      return messages;
-    }
-    return messages.filter((entry) => entry.content.toLowerCase().includes(normalizedSearch));
-  }, [messages, normalizedSearch]);
-
-  const highlightedIds = useMemo(() => {
-    if (!normalizedSearch) {
-      return new Set<string>();
-    }
-    return new Set(filteredMessages.map((entry) => entry.id));
-  }, [filteredMessages, normalizedSearch]);
-
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const media = window.matchMedia('(min-width: 1024px)');
-    const handleChange = () => {
-      setIsDesktop(media.matches);
-      setIsSidebarOpen(media.matches);
-    };
-    handleChange();
-    media.addEventListener('change', handleChange);
-    return () => media.removeEventListener('change', handleChange);
-  }, []);
-
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(236,72,153,0.55),transparent_55%),radial-gradient(circle_at_85%_5%,rgba(124,58,237,0.4),transparent_55%),linear-gradient(180deg,rgba(2,6,23,0.92),rgba(2,6,23,0.95))]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(16,185,129,0.55),transparent_55%),radial-gradient(circle_at_85%_5%,rgba(34,197,94,0.4),transparent_55%),linear-gradient(180deg,rgba(2,6,23,0.92),rgba(2,6,23,0.95))]" />
       <div className="relative z-10">
       <aside
         className={sidebarClasses}
@@ -731,17 +528,17 @@ export default function Home() {
         data-overlay={isSidebarOpen && !isDesktop}
       >
         <div className="flex items-center gap-3">
-          <span className="rounded-full bg-gradient-to-br from-pink-500 via-fuchsia-500 to-purple-500 p-2 text-white shadow-[0_0_25px_rgba(236,72,153,0.45)]">
+          <span className="rounded-full bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500 p-2 text-white shadow-[0_0_25px_rgba(16,185,129,0.45)]">
             <Sparkle className="h-5 w-5" aria-hidden />
           </span>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-pink-300/80">Wellness mode</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-emerald-300/80">Wellness mode</p>
             <p className="text-base font-semibold text-white">Care Console</p>
           </div>
         </div>
 
         <div className="space-y-5 pt-6">
-          <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-[0_25px_60px_rgba(236,72,153,0.12)]">
+          <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-[0_25px_60px_rgba(16,185,129,0.12)]">
             <p className="text-sm font-semibold text-white/90">Welcome back</p>
             <p className="mt-2 text-sm leading-relaxed text-slate-300">
               I'm ready whenever you need help planning next steps or spotting red flags.
@@ -759,15 +556,15 @@ export default function Home() {
                 setIsSidebarOpen(false);
                 setShowPreferences(true);
               }}
-              className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/65 px-5 py-4 text-left shadow-[0_20px_45px_rgba(236,72,153,0.12)] transition hover:border-pink-400/60 hover:bg-slate-900/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-400/70"
+              className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/65 px-5 py-4 text-left shadow-[0_20px_45px_rgba(16,185,129,0.12)] transition hover:border-emerald-400/60 hover:bg-slate-900/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/70"
             >
               <span className="flex items-center gap-3 text-slate-100">
-                <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500 via-fuchsia-500 to-purple-500 text-white shadow-[0_0_15px_rgba(236,72,153,0.35)]">
+                <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.35)]">
                   <Settings className="h-4 w-4" />
                 </span>
                 <span className="text-sm font-semibold leading-tight">Session preferences</span>
             </span>
-              <span className="text-xs uppercase tracking-[0.32em] text-pink-300/70">Open</span>
+              <span className="text-xs uppercase tracking-[0.32em] text-emerald-300/70">Open</span>
             </button>
 
             <button
@@ -776,15 +573,15 @@ export default function Home() {
                 setIsSidebarOpen(false);
                 setShowSafety(true);
               }}
-              className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/65 px-5 py-4 text-left shadow-[0_20px_45px_rgba(124,58,237,0.18)] transition hover:border-violet-400/60 hover:bg-slate-900/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400/70"
+              className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/65 px-5 py-4 text-left shadow-[0_20px_45px_rgba(34,197,94,0.18)] transition hover:border-green-400/60 hover:bg-slate-900/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-400/70"
             >
               <span className="flex items-center gap-3 text-slate-100">
-                <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500 text-white shadow-[0_0_15px_rgba(167,139,250,0.35)]">
+                <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500 via-green-500 to-emerald-500 text-white shadow-[0_0_15px_rgba(20,184,166,0.35)]">
                   <HeartPulse className="h-4 w-4" />
                 </span>
                 <span className="text-sm font-semibold leading-tight">Safety guidance</span>
             </span>
-              <span className="text-xs uppercase tracking-[0.32em] text-violet-300/70">Open</span>
+              <span className="text-xs uppercase tracking-[0.32em] text-green-300/70">Open</span>
             </button>
           </nav>
 
@@ -813,14 +610,14 @@ export default function Home() {
             <button
                 type="button"
           onClick={() => setIsSidebarOpen(true)}
-          className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-slate-900/70 text-white shadow-[0_0_35px_rgba(236,72,153,0.3)] transition hover:border-pink-400/70 hover:text-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-400"
+          className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-slate-900/70 text-white shadow-[0_0_35px_rgba(16,185,129,0.3)] transition hover:border-emerald-400/70 hover:text-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
               >
-          <Sparkle className="h-5 w-5 text-pink-300" aria-hidden />
+          <Sparkle className="h-5 w-5 text-emerald-300" aria-hidden />
             </button>
               <button
                 type="button"
           onClick={() => setIsSidebarOpen(true)}
-          className="flex flex-col items-center gap-1 text-xs font-semibold uppercase tracking-[0.32em] text-pink-300"
+          className="flex flex-col items-center gap-1 text-xs font-semibold uppercase tracking-[0.32em] text-emerald-300"
         >
           <Menu className="h-4 w-4" aria-hidden />
           Open
@@ -835,13 +632,13 @@ export default function Home() {
               onClick={() => setIsSidebarOpen(true)}
               aria-expanded={isSidebarOpen}
               aria-controls="primary-navigation"
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-900/70 px-3 py-2 text-sm font-semibold text-slate-200 shadow-[0_0_25px_rgba(236,72,153,0.18)] transition hover:border-pink-400/70 hover:text-pink-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-400 lg:hidden"
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-900/70 px-3 py-2 text-sm font-semibold text-slate-200 shadow-[0_0_25px_rgba(16,185,129,0.18)] transition hover:border-emerald-400/70 hover:text-emerald-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400 lg:hidden"
             >
               <Menu className="h-4 w-4" aria-hidden />
               <span>Menu</span>
           </button>
               <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.32em] text-pink-300/75">Live care session</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.32em] text-emerald-300/75">Live care session</p>
               <h1 className="text-lg font-semibold text-white sm:text-xl">WellNess Health Companion</h1>
             </div>
               </div>
@@ -850,18 +647,18 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={handleShareConversation}
-                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-900/70 px-3 py-2 text-xs font-semibold text-slate-100 shadow-[0_0_25px_rgba(236,72,153,0.18)] transition hover:border-pink-300/70 hover:text-pink-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-900/70 px-3 py-2 text-xs font-semibold text-slate-100 shadow-[0_0_25px_rgba(16,185,129,0.18)] transition hover:border-emerald-300/70 hover:text-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
                   >
                     <Share2 className="h-4 w-4" aria-hidden />
                     Share
                   </button>
-                  <div className="flex items-center gap-2 rounded-full border border-pink-400/40 bg-gradient-to-r from-pink-500 via-fuchsia-500 to-purple-500 px-4 py-1 text-sm font-medium text-white shadow-[0_0_25px_rgba(236,72,153,0.35)]">
+                  <div className="flex items-center gap-2 rounded-full border border-emerald-400/40 bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 px-4 py-1 text-sm font-medium text-white shadow-[0_0_25px_rgba(16,185,129,0.35)]">
                     <span className="flex h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
                     Online
                   </div>
                 </div>
                 {shareFeedback && (
-                  <p className="text-xs text-pink-200/80" aria-live="polite">
+                  <p className="text-xs text-emerald-200/80" aria-live="polite">
                     {shareFeedback}
                   </p>
                 )}
@@ -872,12 +669,12 @@ export default function Home() {
           <div className="mx-auto flex h-full max-w-4xl flex-col gap-6">
             <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-slate-900/60 px-5 py-6 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl sm:px-6 lg:px-8">
               <div
-                className="absolute inset-y-0 right-0 w-[55%] opacity-60 blur-3xl bg-gradient-to-br from-pink-500 via-fuchsia-500 to-purple-500"
+                className="absolute inset-y-0 right-0 w-[55%] opacity-60 blur-3xl bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500"
                 aria-hidden
               />
               <div className="relative flex flex-col gap-5">
-                <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.32em] text-pink-300/80">
-                  <span className="flex h-2 w-2 rounded-full bg-pink-400" aria-hidden />
+                <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.32em] text-emerald-300/80">
+                  <span className="flex h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
                   Ready when you are
                 </div>
                 <h2 className="text-3xl font-bold text-white sm:text-4xl lg:text-5xl">
@@ -893,15 +690,15 @@ export default function Home() {
                       key={prompt}
                       type="button"
                       onClick={() => handleQuickPrompt(prompt)}
-                      className="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-left shadow-[0_18px_45px_rgba(236,72,153,0.12)] transition hover:border-pink-300/60 hover:text-pink-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                      className="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-left shadow-[0_18px_45px_rgba(16,185,129,0.12)] transition hover:border-emerald-300/60 hover:text-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
                     >
                       {prompt}
                     </button>
                   ))}
                 </div>
-                <div className="flex items-start gap-3 rounded-2xl border border-pink-400/40 bg-gradient-to-r from-pink-500/20 via-fuchsia-500/10 to-purple-500/20 px-4 py-3 text-pink-100 shadow-[0_18px_45px_rgba(236,72,153,0.18)]">
+                <div className="flex items-start gap-3 rounded-2xl border border-emerald-400/40 bg-gradient-to-r from-emerald-500/20 via-green-500/10 to-teal-500/20 px-4 py-3 text-emerald-100 shadow-[0_18px_45px_rgba(16,185,129,0.18)]">
                   <span className="mt-1 flex h-3 w-3 rounded-full bg-white/80" aria-hidden />
-                  <p className="text-xs leading-relaxed text-pink-50 sm:text-sm">
+                  <p className="text-xs leading-relaxed text-emerald-50 sm:text-sm">
                     I’m a virtual companion for everyday care—not a substitute for emergency services or licensed clinicians. If you
                     feel unsafe or notice severe symptoms, please seek urgent medical attention immediately.
                   </p>
@@ -911,7 +708,7 @@ export default function Home() {
 
             <section className="relative overflow-hidden flex-1 rounded-[28px] border border-white/10 bg-slate-900/55 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl">
               <div
-                className="absolute inset-y-0 right-0 w-[45%] opacity-60 blur-3xl bg-gradient-to-br from-purple-500 via-fuchsia-500 to-pink-500"
+                className="absolute inset-y-0 right-0 w-[45%] opacity-60 blur-3xl bg-gradient-to-br from-teal-500 via-green-500 to-emerald-500"
                 aria-hidden
               />
               <div className="relative flex h-full flex-col">
@@ -971,7 +768,7 @@ export default function Home() {
 
             {message.facts && message.facts.length > 0 && !message.safety?.red_flag && (
                       <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5 text-sm text-slate-100 shadow-[0_25px_60px_rgba(15,23,42,0.55)]">
-                            <h4 className="text-sm font-semibold uppercase tracking-[0.32em] text-pink-200">Additional insights</h4>
+                            <h4 className="text-sm font-semibold uppercase tracking-[0.32em] text-emerald-200">Additional insights</h4>
                         <div className="mt-3 space-y-3">
                           {message.facts.map((fact: any, factIndex: number) => {
                             if (!fact?.data || fact.data.length === 0) return null;
@@ -1016,10 +813,10 @@ export default function Home() {
                               return (
                                 <div
                                   key={`fact-${fact.type}-${factIndex}`}
-                                  className="rounded-2xl border border-violet-400/40 bg-violet-500/10 p-3"
+                                  className="rounded-2xl border border-teal-400/40 bg-teal-500/10 p-3"
                                 >
-                                      <p className="font-semibold text-violet-200">Providers you might consider</p>
-                                  <ul className="mt-2 space-y-1 text-sm text-violet-100/90">
+                                      <p className="font-semibold text-teal-200">Providers you might consider</p>
+                                  <ul className="mt-2 space-y-1 text-sm text-teal-100/90">
                                     {fact.data.map((provider: any, idx: number) => (
                                       <li key={`${provider.provider}-${idx}`}>
                                         <strong>{provider.provider}</strong>
@@ -1052,10 +849,10 @@ export default function Home() {
                               return (
                                 <div
                                   key={`fact-${fact.type}-${factIndex}`}
-                                      className="rounded-2xl border border-fuchsia-400/40 bg-fuchsia-500/10 p-3"
+                                      className="rounded-2xl border border-green-400/40 bg-green-500/10 p-3"
                                     >
-                                      <p className="font-semibold text-fuchsia-200">Pregnancy considerations</p>
-                                      <ul className="mt-2 space-y-1 text-sm text-fuchsia-100/90">
+                                      <p className="font-semibold text-green-200">Pregnancy considerations</p>
+                                      <ul className="mt-2 space-y-1 text-sm text-green-100/90">
                                         {Array.isArray(fact.data.guidance)
                                           ? fact.data.guidance.map((item: string, idx: number) => (
                                               <li key={`${item}-${idx}`}>{item}</li>
@@ -1094,7 +891,7 @@ export default function Home() {
 
         <div className={bottomBarClasses} style={{ pointerEvents: 'none' }}>
           <form
-            className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-4 rounded-[32px] border border-white/10 bg-slate-900/70 px-4 py-4 shadow-[0_28px_80px_rgba(236,72,153,0.25)] backdrop-blur-xl sm:flex-nowrap sm:px-6"
+            className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-4 rounded-[32px] border border-white/10 bg-slate-900/70 px-4 py-4 shadow-[0_28px_80px_rgba(16,185,129,0.25)] backdrop-blur-xl sm:flex-nowrap sm:px-6"
             style={{ pointerEvents: 'auto' }}
             onSubmit={(event) => {
               event.preventDefault();
@@ -1111,10 +908,10 @@ export default function Home() {
                 }
               }}
               className={clsx(
-                'flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold shadow-[0_18px_45px_rgba(236,72,153,0.35)] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
+                'flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold shadow-[0_18px_45px_rgba(16,185,129,0.35)] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
                 isRecording
                   ? 'border border-red-400/60 bg-red-500 text-white focus-visible:outline-red-300'
-                  : 'border border-transparent bg-gradient-to-br from-pink-500 via-fuchsia-500 to-purple-500 text-white hover:scale-[1.03] focus-visible:outline-pink-300'
+                  : 'border border-transparent bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500 text-white hover:scale-[1.03] focus-visible:outline-emerald-300'
               )}
               aria-pressed={isRecording}
               aria-label={isRecording ? 'Stop recording' : 'Start voice recording'}
@@ -1136,7 +933,7 @@ export default function Home() {
                 onKeyDown={handleKeyDown}
                 placeholder={selectedPlaceholder}
                 rows={3}
-                className="min-h-[80px] w-full resize-none rounded-2xl border border-white/10 bg-transparent px-4 py-3 text-sm leading-relaxed text-slate-100 shadow-inner shadow-black/20 transition placeholder:text-slate-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-400/80"
+                className="min-h-[80px] w-full resize-none rounded-2xl border border-white/10 bg-transparent px-4 py-3 text-sm leading-relaxed text-slate-100 shadow-inner shadow-black/20 transition placeholder:text-slate-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/80"
                 aria-label="Write your question"
                 disabled={isLoading}
               />
@@ -1147,7 +944,7 @@ export default function Home() {
 
             <button
               type="submit"
-              className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full border border-transparent bg-gradient-to-br from-fuchsia-500 via-pink-500 to-purple-500 text-white shadow-[0_18px_45px_rgba(236,72,153,0.35)] transition hover:scale-[1.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+              className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full border border-transparent bg-gradient-to-br from-green-500 via-emerald-500 to-teal-500 text-white shadow-[0_18px_45px_rgba(16,185,129,0.35)] transition hover:scale-[1.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
               disabled={isLoading}
               aria-label="Send message"
             >
@@ -1159,21 +956,26 @@ export default function Home() {
       {showPreferences && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 backdrop-blur-sm">
           <section
-            className="relative w-full max-w-2xl rounded-3xl border border-white/60 bg-white/95 p-8 shadow-2xl"
+            className="relative w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-slate-900/70 p-8 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl"
             role="dialog"
             aria-modal="true"
             aria-label="Session preferences"
           >
+            <div
+              className="absolute inset-0 -z-10 opacity-30 blur-3xl"
+              style={{ background: 'radial-gradient(circle at 20% 20%, rgba(16,185,129,0.3), transparent 60%), radial-gradient(circle at 80% 20%, rgba(34,197,94,0.25), transparent 55%)' }}
+              aria-hidden
+            />
             <button
               onClick={() => setShowPreferences(false)}
-              className="absolute right-5 top-5 rounded-full border border-slate-200 px-2 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
+              className="absolute right-5 top-5 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.3em] text-slate-300 transition hover:border-emerald-400/60 hover:bg-slate-900/80 hover:text-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
               aria-label="Close session preferences"
             >
               Close
             </button>
             <header>
-              <h2 className="text-2xl font-bold text-slate-800">Session preferences</h2>
-              <p className="mt-2 text-sm text-slate-600">
+              <h2 className="text-2xl font-bold text-white">Session preferences</h2>
+              <p className="mt-2 text-sm text-slate-300">
                 Adjust how the assistant responds and update your health profile for more tailored guidance.
               </p>
             </header>
@@ -1187,10 +989,10 @@ export default function Home() {
                 onEdit={handleOpenProfileModal}
               />
 
-              <div className="space-y-3 rounded-2xl border border-ocean-100 bg-white/80 p-5 shadow-sm">
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/60 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.55)]">
                 <label
                   htmlFor="language-preferences"
-                  className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"
+                  className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-300/80"
                 >
                   Language
                 </label>
@@ -1198,25 +1000,25 @@ export default function Home() {
                   id="language-preferences"
                   value={lang}
                   onChange={(event) => setLang(event.target.value as LangCode)}
-                  className="rounded-2xl border border-ocean-100 bg-white px-4 py-2 text-sm text-slate-700 shadow focus:border-ocean-300 focus:outline-none focus:ring-4 focus:ring-ocean-200/40"
+                  className="w-full rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-2 text-sm text-slate-100 shadow-inner shadow-black/20 focus:border-emerald-400/60 focus:outline-none focus:ring-4 focus:ring-emerald-500/20"
                 >
                   {LANGUAGE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
+                    <option key={option.value} value={option.value} className="bg-slate-900">
                       {option.label}
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-400">
                   Switching the language updates the assistant's replies and placeholder prompts.
                 </p>
-          <button
+                <button
                   onClick={handleOpenProfileModal}
-                  className="rounded-2xl border border-ocean-100 px-4 py-2 text-sm font-semibold text-ocean-700 transition hover:bg-ocean-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
-          >
+                  className="mt-3 rounded-2xl border border-emerald-400/40 bg-gradient-to-r from-emerald-500/20 via-green-500/15 to-teal-500/20 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:border-emerald-400/60 hover:from-emerald-500/30 hover:via-green-500/25 hover:to-teal-500/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
+                >
                   Edit health profile
-          </button>
-        </div>
-      </div>
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       )}
@@ -1224,46 +1026,53 @@ export default function Home() {
       {showSafety && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 backdrop-blur-sm">
           <section
-            className="relative w-full max-w-xl rounded-3xl border border-white/60 bg-white/95 p-8 shadow-2xl"
+            className="relative w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-slate-900/70 p-8 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl"
             role="dialog"
             aria-modal="true"
             aria-label="Safety guidance"
           >
+            <div
+              className="absolute inset-0 -z-10 opacity-30 blur-3xl"
+              style={{ background: 'radial-gradient(circle at 20% 20%, rgba(16,185,129,0.3), transparent 60%), radial-gradient(circle at 80% 20%, rgba(34,197,94,0.25), transparent 55%)' }}
+              aria-hidden
+            />
             <button
               onClick={() => setShowSafety(false)}
-              className="absolute right-5 top-5 rounded-full border border-slate-200 px-2 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mint-200"
+              className="absolute right-5 top-5 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.3em] text-slate-300 transition hover:border-emerald-400/60 hover:bg-slate-900/80 hover:text-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
               aria-label="Close safety guidance"
             >
               Close
             </button>
             <header className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-mint-100 text-mint-700">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500/30 via-green-500/25 to-teal-500/30 text-emerald-200 shadow-[0_0_20px_rgba(16,185,129,0.4)]">
                 <HeartPulse className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-slate-800">Emergency guidance</h2>
-                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Stay prepared</p>
+                <h2 className="text-2xl font-bold text-white">Emergency guidance</h2>
+                <p className="text-xs uppercase tracking-[0.3em] text-emerald-300/80">Stay prepared</p>
               </div>
             </header>
 
-            <div className="mt-6 space-y-4 text-sm leading-relaxed text-slate-600">
+            <div className="mt-6 space-y-4 text-sm leading-relaxed text-slate-300">
               <p>
                 This assistant can highlight red flags, but it cannot diagnose or provide emergency care. Contact local services
                 immediately if you notice:
               </p>
-              <ul className="list-disc space-y-2 pl-5">
+              <ul className="list-disc space-y-2 pl-5 text-slate-200">
                 <li>Chest pain, shortness of breath, or sudden weakness.</li>
                 <li>Severe bleeding, confusion, or loss of consciousness.</li>
                 <li>Worsening symptoms after self-care guidance.</li>
               </ul>
-              <p className="rounded-2xl border border-mint-200 bg-mint-50/70 p-4 text-mint-800">
-                Call your local emergency number (India: 108) or visit the nearest emergency department for urgent concerns.
-              </p>
+              <div className="rounded-2xl border border-emerald-400/40 bg-gradient-to-r from-emerald-500/20 via-green-500/15 to-teal-500/20 p-4 text-emerald-100 shadow-[0_18px_45px_rgba(16,185,129,0.18)]">
+                <p className="font-semibold text-emerald-50">
+                  Call your local emergency number (India: 108) or visit the nearest emergency department for urgent concerns.
+                </p>
+              </div>
               <button
                 onClick={() => window.open('tel:108')}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-mint-500 px-4 py-2 font-semibold text-white shadow transition hover:bg-mint-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mint-200"
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 px-4 py-3 font-semibold text-white shadow-[0_18px_45px_rgba(16,185,129,0.35)] transition hover:scale-[1.02] hover:shadow-[0_25px_60px_rgba(16,185,129,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
               >
-                <Phone className="h-4 w-4" />
+                <Phone className="h-5 w-5" />
                 Call Emergency (108)
               </button>
             </div>
@@ -1273,55 +1082,60 @@ export default function Home() {
 
       {showProfile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 backdrop-blur-sm">
-          <div className="relative w-full max-w-lg rounded-3xl border border-white/60 bg-white/90 p-8 shadow-2xl">
+          <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-slate-900/70 p-8 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl">
+            <div
+              className="absolute inset-0 -z-10 opacity-30 blur-3xl"
+              style={{ background: 'radial-gradient(circle at 20% 20%, rgba(16,185,129,0.3), transparent 60%), radial-gradient(circle at 80% 20%, rgba(34,197,94,0.25), transparent 55%)' }}
+              aria-hidden
+            />
             <button
               onClick={() => setShowProfile(false)}
-              className="absolute right-5 top-5 rounded-full border border-slate-200 px-2 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-200"
+              className="absolute right-5 top-5 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.3em] text-slate-300 transition hover:border-emerald-400/60 hover:bg-slate-900/80 hover:text-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
               aria-label="Close profile modal"
             >
               Close
             </button>
-            <h2 className="text-2xl font-bold text-slate-800">Health profile</h2>
-            <p className="mt-2 text-sm text-slate-600">
+            <h2 className="text-2xl font-bold text-white">Health profile</h2>
+            <p className="mt-2 text-sm text-slate-300">
               Update basic details so I can tailor contextual guidance. Your information stays on this device.
             </p>
 
             <div className="mt-6 space-y-4">
-              <label className="flex items-center gap-3 rounded-2xl border border-ocean-100 bg-white/80 px-4 py-3 text-sm text-slate-700 shadow-sm transition hover:border-ocean-200">
+              <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 shadow-[0_12px_30px_rgba(15,23,42,0.45)] transition hover:border-emerald-400/30 hover:shadow-[0_18px_45px_rgba(16,185,129,0.18)]">
                 <input
                   type="checkbox"
                   checked={profile.diabetes}
                   onChange={(event) => setProfile((prev) => ({ ...prev, diabetes: event.target.checked }))}
-                  className="h-5 w-5 rounded border-ocean-200 text-ocean-500 focus:ring-ocean-300"
+                  className="h-5 w-5 rounded border-white/20 bg-slate-800 text-emerald-500 focus:ring-emerald-400/50"
                 />
                 I have diabetes
               </label>
 
-              <label className="flex items-center gap-3 rounded-2xl border border-ocean-100 bg-white/80 px-4 py-3 text-sm text-slate-700 shadow-sm transition hover:border-ocean-200">
+              <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 shadow-[0_12px_30px_rgba(15,23,42,0.45)] transition hover:border-emerald-400/30 hover:shadow-[0_18px_45px_rgba(16,185,129,0.18)]">
                 <input
                   type="checkbox"
                   checked={profile.hypertension}
                   onChange={(event) => setProfile((prev) => ({ ...prev, hypertension: event.target.checked }))}
-                  className="h-5 w-5 rounded border-ocean-200 text-ocean-500 focus:ring-ocean-300"
+                  className="h-5 w-5 rounded border-white/20 bg-slate-800 text-emerald-500 focus:ring-emerald-400/50"
                 />
                 I have hypertension
               </label>
 
               {(profile.sex === 'female' || profile.sex === undefined || profile.sex === 'other') && (
-                <label className="flex items-center gap-3 rounded-2xl border border-ocean-100 bg-white/80 px-4 py-3 text-sm text-slate-700 shadow-sm transition hover:border-ocean-200">
+                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 shadow-[0_12px_30px_rgba(15,23,42,0.45)] transition hover:border-emerald-400/30 hover:shadow-[0_18px_45px_rgba(16,185,129,0.18)]">
                 <input
                   type="checkbox"
                     checked={profile.pregnancy}
                     onChange={(event) => setProfile((prev) => ({ ...prev, pregnancy: event.target.checked }))}
-                    className="h-5 w-5 rounded border-ocean-200 text-ocean-500 focus:ring-ocean-300"
+                    className="h-5 w-5 rounded border-white/20 bg-slate-800 text-emerald-500 focus:ring-emerald-400/50"
                   />
                   I am currently pregnant
                 </label>
               )}
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <label className="space-y-2 text-sm text-slate-600">
-                  <span className="block font-semibold text-slate-500">Age (years)</span>
+                <label className="space-y-2 text-sm text-slate-300">
+                  <span className="block font-semibold text-emerald-300/80">Age (years)</span>
                   <input
                     type="number"
                     min={0}
@@ -1332,12 +1146,12 @@ export default function Home() {
                         age: event.target.value ? Number(event.target.value) : undefined,
                       }))
                     }
-                    className="w-full rounded-2xl border border-ocean-100 bg-white/80 px-4 py-2 text-slate-700 shadow-sm focus:border-ocean-300 focus:outline-none focus:ring-4 focus:ring-ocean-200/50"
+                    className="w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-2 text-slate-100 shadow-inner shadow-black/20 focus:border-emerald-400/60 focus:outline-none focus:ring-4 focus:ring-emerald-500/20"
                   />
               </label>
 
-                <label className="space-y-2 text-sm text-slate-600">
-                  <span className="block font-semibold text-slate-500">Sex</span>
+                <label className="space-y-2 text-sm text-slate-300">
+                  <span className="block font-semibold text-emerald-300/80">Sex</span>
                   <select
                     value={profile.sex ?? ''}
                     onChange={(event) =>
@@ -1347,24 +1161,24 @@ export default function Home() {
                         pregnancy: event.target.value === 'female' ? prev.pregnancy : false,
                       }))
                     }
-                    className="w-full rounded-2xl border border-ocean-100 bg-white/80 px-4 py-2 text-slate-700 shadow-sm focus:border-ocean-300 focus:outline-none focus:ring-4 focus:ring-ocean-200/50"
+                    className="w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-2 text-slate-100 shadow-inner shadow-black/20 focus:border-emerald-400/60 focus:outline-none focus:ring-4 focus:ring-emerald-500/20"
                   >
-                    <option value="">Select</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other / Prefer not to say</option>
+                    <option value="" className="bg-slate-900">Select</option>
+                    <option value="male" className="bg-slate-900">Male</option>
+                    <option value="female" className="bg-slate-900">Female</option>
+                    <option value="other" className="bg-slate-900">Other / Prefer not to say</option>
                   </select>
                 </label>
               </div>
 
-              <label className="space-y-2 text-sm text-slate-600">
-                <span className="block font-semibold text-slate-500">City (optional)</span>
+              <label className="space-y-2 text-sm text-slate-300">
+                <span className="block font-semibold text-emerald-300/80">City (optional)</span>
                 <input
                   type="text"
                   value={profile.city ?? ''}
                   onChange={(event) => setProfile((prev) => ({ ...prev, city: event.target.value }))}
                   placeholder="e.g., Mumbai"
-                  className="w-full rounded-2xl border border-ocean-100 bg-white/80 px-4 py-2 text-slate-700 shadow-sm focus:border-ocean-300 focus:outline-none focus:ring-4 focus:ring-ocean-200/50"
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-2 text-slate-100 shadow-inner shadow-black/20 focus:border-emerald-400/60 focus:outline-none focus:ring-4 focus:ring-emerald-500/20"
                 />
               </label>
             </div>
@@ -1372,13 +1186,13 @@ export default function Home() {
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => setShowProfile(false)}
-                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300"
+                className="rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-white/20 hover:bg-slate-900/80 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
               >
                 Cancel
               </button>
             <button
               onClick={() => setShowProfile(false)}
-                className="rounded-2xl bg-ocean-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-ocean-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-300"
+                className="rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(16,185,129,0.35)] transition hover:scale-[1.02] hover:shadow-[0_15px_40px_rgba(16,185,129,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
             >
                 Save profile
             </button>

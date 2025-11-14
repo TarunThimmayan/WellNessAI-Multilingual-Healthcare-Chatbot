@@ -112,3 +112,5 @@ prisma db push --schema prisma/schema.prisma --accept-data-loss
 - All database operations are async
 - The Prisma client is automatically connected on application startup
 
+
+

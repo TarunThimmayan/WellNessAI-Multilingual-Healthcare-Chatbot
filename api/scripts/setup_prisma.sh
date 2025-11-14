@@ -32,3 +32,5 @@ fi
 
 echo "✓ Prisma setup complete!"
 
+
+

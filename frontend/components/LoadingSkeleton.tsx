@@ -8,7 +8,7 @@ interface LoadingSkeletonProps {
 }
 
 const shimmer =
-  "relative overflow-hidden before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.8s_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/60 before:to-transparent";
+  "relative overflow-hidden before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.8s_infinite] before:bg-gradient-to-r before:from-transparent before:via-emerald-400/60 before:to-transparent";
 
 const keyframes = `
 @keyframes shimmer {
@@ -24,13 +24,13 @@ function MessageSkeleton() {
       <style>{keyframes}</style>
       <div
         className={clsx(
-          "w-[92%] max-w-3xl rounded-3xl bg-white/80 p-5 shadow",
+          "w-[92%] max-w-3xl rounded-3xl bg-slate-900/60 border border-white/10 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.55)]",
           shimmer
         )}
       >
-        <div className="h-4 w-3/4 rounded-full bg-slate-200" />
-        <div className="mt-3 h-4 w-5/6 rounded-full bg-slate-200" />
-        <div className="mt-3 h-4 w-2/5 rounded-full bg-slate-200" />
+        <div className="h-4 w-3/4 rounded-full bg-emerald-500/30" />
+        <div className="mt-3 h-4 w-5/6 rounded-full bg-emerald-500/30" />
+        <div className="mt-3 h-4 w-2/5 rounded-full bg-emerald-500/30" />
       </div>
     </div>
   );
@@ -40,17 +40,17 @@ function ProfileSkeleton() {
   return (
     <div
       className={clsx(
-        "rounded-2xl border border-white/50 bg-white/70 p-6 shadow backdrop-blur",
+        "rounded-2xl border border-white/10 bg-slate-950/60 p-6 shadow-[0_18px_45px_rgba(15,23,42,0.55)] backdrop-blur",
         shimmer
       )}
       aria-hidden
     >
       <style>{keyframes}</style>
-      <div className="h-5 w-1/3 rounded-full bg-slate-200" />
+      <div className="h-5 w-1/3 rounded-full bg-emerald-500/30" />
       <div className="mt-4 flex flex-col gap-2">
-        <div className="h-4 w-full rounded-full bg-slate-200" />
-        <div className="h-4 w-5/6 rounded-full bg-slate-200" />
-        <div className="h-4 w-2/3 rounded-full bg-slate-200" />
+        <div className="h-4 w-full rounded-full bg-emerald-500/30" />
+        <div className="h-4 w-5/6 rounded-full bg-emerald-500/30" />
+        <div className="h-4 w-2/3 rounded-full bg-emerald-500/30" />
       </div>
     </div>
   );

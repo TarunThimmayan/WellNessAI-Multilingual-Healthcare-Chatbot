@@ -1,35 +1,57 @@
 import os
 import logging
-from typing import Optional
+from typing import Optional, Any
 from pathlib import Path
 
 logger = logging.getLogger("health_assistant")
 
-# Try to import Prisma, handle if not available
-try:
-    from prisma import Prisma
-    from prisma.models import Customer, ChatSession, ChatMessage
-    PRISMA_AVAILABLE = True
-except ImportError:
-    PRISMA_AVAILABLE = False
-    logger.warning("Prisma not available. Install with: pip install prisma")
-    Prisma = None
-    Customer = None
-    ChatSession = None
-    ChatMessage = None
+# Lazy import Prisma to avoid errors at module level
+# Prisma will be imported when needed
+PRISMA_AVAILABLE = None  # Will be set dynamically
+Prisma = None
+Customer = None
+ChatSession = None
+ChatMessage = None
+
+def _try_import_prisma():
+    """Try to import Prisma, set global variables"""
+    global PRISMA_AVAILABLE, Prisma, Customer, ChatSession, ChatMessage
+    
+    if PRISMA_AVAILABLE is not None:
+        return PRISMA_AVAILABLE
+    
+    try:
+        from prisma import Prisma
+        from prisma.models import Customer, ChatSession, ChatMessage
+        PRISMA_AVAILABLE = True
+        return True
+    except (ImportError, RuntimeError) as e:
+        # RuntimeError can occur if client hasn't been generated yet
+        if "hasn't been generated" in str(e):
+            logger.warning("Prisma client not generated yet. It will be generated on first use.")
+        else:
+            logger.warning(f"Prisma not available: {e}")
+        PRISMA_AVAILABLE = False
+        Prisma = None
+        Customer = None
+        ChatSession = None
+        ChatMessage = None
+        return False
 
 
 class PrismaClient:
     """Prisma client wrapper for database operations"""
     
     def __init__(self):
-        self.client: Optional[Prisma] = None
+        self.client: Optional[Any] = None  # Prisma type will be set after import
         self._is_connected = False
     
     async def connect(self) -> bool:
         """Connect to the database"""
-        if not PRISMA_AVAILABLE:
-            logger.error("Prisma is not available. Install with: pip install prisma")
+        # Try to import Prisma if not already available
+        if not _try_import_prisma():
+            logger.error("Prisma is not available. The client may need to be generated.")
+            logger.error("Please run: npx prisma generate --schema prisma/schema.prisma")
             return False
         
         if self._is_connected and self.client:
@@ -41,6 +63,13 @@ class PrismaClient:
             self._is_connected = True
             logger.info("Successfully connected to database using Prisma")
             return True
+        except RuntimeError as e:
+            if "hasn't been generated" in str(e):
+                logger.error("Prisma client not generated. Please run: npx prisma generate --schema prisma/schema.prisma")
+            else:
+                logger.error(f"Failed to connect to database: {e}")
+            self._is_connected = False
+            return False
         except Exception as e:
             logger.error(f"Failed to connect to database: {e}")
             self._is_connected = False
@@ -85,7 +114,7 @@ class PrismaClient:
 prisma_client = PrismaClient()
 
 
-async def get_prisma_client() -> Prisma:
+async def get_prisma_client() -> Any:
     """Get Prisma client instance"""
     await prisma_client.ensure_connected()
     if not prisma_client.client:
