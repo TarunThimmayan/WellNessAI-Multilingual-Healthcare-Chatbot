@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: healthcare-chatbot-api
+    env: python
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install --prefer-binary -r api/requirements.txt
+    startCommand: cd api && uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2
+    plan: starter
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ENVIRONMENT
+        value: production
+      - key: PIP_NO_BUILD_ISOLATION
+        value: "0"
+      - key: MATURIN_PEP517_ARGS
+        value: "--no-build-isolation"
+
