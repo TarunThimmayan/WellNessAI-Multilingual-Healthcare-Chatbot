@@ -1673,7 +1673,7 @@ async def chat(
         response, target_lang, timings = process_chat_request(request)
         
         # Save assistant response to database (L3 cache)
-        if prisma_client.is_connected() and session_id:
+        if db_client.is_connected() and session_id:
             try:
                 # Convert safety to dict
                 safety_dict = response.safety.model_dump() if hasattr(response.safety, 'model_dump') else dict(response.safety)
@@ -1886,7 +1886,7 @@ async def voice_chat(
         chat_response, target_lang, chat_timings = process_chat_request(chat_request)
 
         # Save assistant response to database
-        if prisma_client.is_connected() and session_id:
+        if db_client.is_connected() and session_id:
             try:
                 safety_dict = chat_response.safety.model_dump() if hasattr(chat_response.safety, 'model_dump') else dict(chat_response.safety)
                 

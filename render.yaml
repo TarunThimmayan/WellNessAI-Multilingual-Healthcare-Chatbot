@@ -3,6 +3,7 @@ services:
     name: healthcare-chatbot-api
     env: python
     buildCommand: pip install -r api/requirements.txt
+    predeployCommand: python api/rag/build_index.py || echo "Index build completed (or skipped if data unavailable)"
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     plan: starter
     envVars:

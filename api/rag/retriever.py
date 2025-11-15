@@ -142,7 +142,12 @@ def retrieve(query: str, k: int = 4) -> List[Dict[str, str]]:
                 print(f"Results keys: {results.keys() if isinstance(results, dict) else 'Not a dict'}")
                 if isinstance(results, dict):
                     for key, value in results.items():
-                        print(f"  {key}: type={type(value).__name__}, value={str(value)[:100] if not isinstance(value, (list, dict)) else f'{type(value).__name__} with {len(value) if hasattr(value, "__len__") else "no len"} items'}")
+                        if isinstance(value, (list, dict)):
+                            item_count = len(value) if hasattr(value, "__len__") else "no len"
+                            value_str = f"{type(value).__name__} with {item_count} items"
+                        else:
+                            value_str = str(value)[:100]
+                        print(f"  {key}: type={type(value).__name__}, value={value_str}")
         except:
             pass
         return []
