@@ -3,7 +3,7 @@
 import clsx from "clsx";
 
 interface LoadingSkeletonProps {
-  variant?: "message" | "profile";
+  variant?: "message" | "profile" | "chatHistory";
   count?: number;
 }
 
@@ -56,14 +56,40 @@ function ProfileSkeleton() {
   );
 }
 
+function ChatHistorySkeleton() {
+  return (
+    <div
+      className={clsx(
+        "group relative flex items-center gap-2 rounded-lg border border-transparent bg-slate-800/30 px-3 py-2",
+        shimmer
+      )}
+      aria-hidden
+    >
+      <style>{keyframes}</style>
+      <div className="flex-1 min-w-0">
+        <div className="h-3 w-16 rounded-full bg-emerald-500/30 mb-2" />
+        <div className="h-4 w-full rounded-full bg-emerald-500/30 mb-1" />
+        <div className="h-3 w-12 rounded-full bg-emerald-500/30" />
+      </div>
+      <div className="flex-shrink-0 h-4 w-4 rounded bg-emerald-500/30" />
+    </div>
+  );
+}
+
 export default function LoadingSkeleton({
   variant = "message",
   count = 1,
 }: LoadingSkeletonProps) {
-  const renderItem = variant === "profile" ? <ProfileSkeleton /> : <MessageSkeleton />;
+  const renderItem = 
+    variant === "profile" ? <ProfileSkeleton /> :
+    variant === "chatHistory" ? <ChatHistorySkeleton /> :
+    <MessageSkeleton />;
 
   return (
-    <div className="flex flex-col gap-4" role="presentation">
+    <div className={clsx(
+      "flex flex-col",
+      variant === "chatHistory" ? "gap-1" : "gap-4"
+    )} role="presentation">
       {Array.from({ length: count }).map((_, idx) => (
         <div key={idx}>{renderItem}</div>
       ))}

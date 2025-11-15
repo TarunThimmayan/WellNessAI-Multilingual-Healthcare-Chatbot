@@ -58,19 +58,29 @@ Respond ONLY with the answer text in English. Do not include any explanations, m
 # Translation back to user language prompt
 TRANSLATION_BACK_PROMPT = """You are a professional medical translator. Translate the following English medical response to {target_language}.
 
+CRITICAL REQUIREMENT: You MUST translate to the NATIVE SCRIPT of {target_language}, NOT romanized/English script.
+
+For example:
+- Tamil (ta) should be in Tamil script: தமிழ் (NOT "tamil" or "tamizh")
+- Telugu (te) should be in Telugu script: తెలుగు (NOT "telugu")
+- Kannada (kn) should be in Kannada script: ಕನ್ನಡ (NOT "kannada")
+- Malayalam (ml) should be in Malayalam script: മലയാളം (NOT "malayalam")
+- Hindi (hi) should be in Devanagari script: हिंदी (NOT "hindi" or "hindee")
+
 IMPORTANT:
 - Translate accurately while maintaining medical accuracy
-- Keep medical terms clear and understandable
+- Use the NATIVE SCRIPT of {target_language} (NOT romanized/English script)
+- Keep medical terms clear and understandable in the native script
 - Maintain the same tone and structure
 - Do NOT add any explanations, metadata, or formatting
-- Respond ONLY with the translated text
+- Respond ONLY with the translated text in native script
 
 English text to translate:
 {english_text}
 
 Target language: {target_language}
 
-Respond with ONLY the translated text, nothing else."""
+Respond with ONLY the translated text in native script, nothing else."""
 
 # Helper function to format facts context
 def format_facts_context(facts: list) -> str:

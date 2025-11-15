@@ -52,6 +52,15 @@ def detect_language_only(
 
 Valid language codes: "en" (English), "hi" (Hindi), "ta" (Tamil), "te" (Telugu), "kn" (Kannada), "ml" (Malayalam)
 
+IMPORTANT: The text may be written in English script (romanized). For example:
+- "ennachu thala valikuthu" is Tamil (ta) written in English script (Tanglish)
+- "kya hai" is Hindi (hi) written in English script (Hinglish)
+- "em chestunnav" is Telugu (te) written in English script
+- "yenu aagide" is Kannada (kn) written in English script
+- "enthanu cheyyunnu" is Malayalam (ml) written in English script
+
+Detect the INTENDED language based on the words and phrases, even if written in English script.
+
 Text to analyze:
 {user_text}
 
@@ -377,7 +386,7 @@ def translate_to_user_language(
     
     for attempt in range(retry_count):
         try:
-            system_content = f"You are a professional medical translator. Translate accurately to {lang_name} in native script."
+            system_content = f"You are a professional medical translator. Translate accurately to {lang_name} in NATIVE SCRIPT (NOT romanized/English script). For example, Tamil must be in Tamil script (தமிழ்), Telugu in Telugu script (తెలుగు), Kannada in Kannada script (ಕನ್ನಡ), Malayalam in Malayalam script (മലയാളം), and Hindi in Devanagari script (हिंदी)."
             
             response = client.chat.completions.create(
                 model=model,

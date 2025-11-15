@@ -45,12 +45,12 @@ except ImportError as e:
 # Try to import database services (optional)
 try:
     from database import db_service
-    from database import prisma_client
+    from database import db_client
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
     db_service = None
-    prisma_client = None
+    db_client = None
     print("[WARN] Database services not available - L3 tests will be skipped")
 
 finally:

@@ -27,7 +27,7 @@ async def require_auth(request: Request) -> dict:
     return await get_current_user_required(request)
 
 
-async def require_role(allowed_roles: List[str]):
+def require_role(allowed_roles: List[str]):
     """
     Middleware factory to require specific roles
     
@@ -115,6 +115,8 @@ def role_required(allowed_roles: List[str]):
         
         return wrapper
     return decorator
+
+
 
 
 

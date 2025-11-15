@@ -14,15 +14,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from auth.service import auth_service
-from database import prisma_client
+from database import db_client
 
 
 async def create_admin():
     """Create an admin user"""
     # Connect to database
-    await prisma_client.connect()
+    await db_client.connect()
     
-    if not prisma_client.is_connected():
+    if not db_client.is_connected():
         print("ERROR: Could not connect to database")
         print("Make sure NEON_DB_URL is set in your .env file")
         sys.exit(1)
@@ -53,11 +53,13 @@ async def create_admin():
         print("User may already exist")
         sys.exit(1)
     
-    await prisma_client.disconnect()
+    await db_client.disconnect()
 
 
 if __name__ == "__main__":
     asyncio.run(create_admin())
+
+
 
 
 

@@ -21,6 +21,7 @@ import {
   Search,
   User,
   LogOut,
+  Trash2,
 } from 'lucide-react';
 import ChatMessage, { type ChatMessageModel } from '../components/ChatMessage';
 import LoadingSkeleton from '../components/LoadingSkeleton';
@@ -29,6 +30,7 @@ import ProfileCard from '../components/ProfileCard';
 import TopicSuggestions from '../components/TopicSuggestions';
 import WelcomeScreen from '../components/WelcomeScreen';
 import SearchChatsModal from '../components/SearchChatsModal';
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import { TOPIC_CATEGORIES } from '../data/topics';
 import { CalendarDays, Heart, MapPin, Stethoscope } from 'lucide-react';
 
@@ -161,6 +163,22 @@ export default function Home() {
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
   const [showWelcome, setShowWelcome] = useState(false);
   const [showSearchChats, setShowSearchChats] = useState(false);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    sessionId: string | null;
+  }>({ isOpen: false, sessionId: null });
+  const [chatSessions, setChatSessions] = useState<Array<{
+    id: string;
+    customerId: string;
+    createdAt: string;
+    updatedAt: string;
+    language?: string;
+    messageCount: number;
+    firstMessage?: string;
+  }>>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
 
   // All refs must be declared before any conditional returns
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -174,12 +192,109 @@ export default function Home() {
   const currentLanguage =
     LANGUAGE_OPTIONS.find((option) => option.value === lang) ?? LANGUAGE_OPTIONS[0];
 
-  // Check authentication on mount
+  // Load chat sessions from browser cache
+  const loadChatSessionsFromCache = useCallback((customerId: string): Array<any> | null => {
+    try {
+      const cacheKey = `chat_sessions_${customerId}`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        // Use cache if less than 5 minutes old
+        if (Date.now() - timestamp < 5 * 60 * 1000) {
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('Error loading sessions from cache:', err);
+    }
+    return null;
+  }, []);
+
+  // Save chat sessions to browser cache
+  const saveChatSessionsToCache = useCallback((customerId: string, sessions: Array<any>) => {
+    try {
+      const cacheKey = `chat_sessions_${customerId}`;
+      const cacheData = {
+        data: sessions,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+    } catch (err) {
+      console.warn('Error saving sessions to cache:', err);
+    }
+  }, []);
+
+  // Load chat sessions from API
+  const loadChatSessions = useCallback(async (customerId: string) => {
+    if (!customerId) return;
+    
+    setSessionsLoading(true);
+    try {
+      // Try cache first
+      const cachedSessions = loadChatSessionsFromCache(customerId);
+      if (cachedSessions && cachedSessions.length > 0) {
+        setChatSessions(cachedSessions);
+        setSessionsLoading(false);
+      }
+
+      // Fetch from API
+      const response = await apiClient.get(`${API_BASE}/customer/${customerId}/sessions?limit=1000`);
+      const sessions = response.data || [];
+      setChatSessions(sessions);
+      saveChatSessionsToCache(customerId, sessions);
+    } catch (err: any) {
+      console.error('Error loading chat sessions:', err);
+      // Keep cached data if API fails
+      const cachedSessions = loadChatSessionsFromCache(customerId);
+      if (!cachedSessions || cachedSessions.length === 0) {
+        setChatSessions([]);
+      }
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, [loadChatSessionsFromCache, saveChatSessionsToCache]);
+
+  // Check authentication on mount and get user info
   useEffect(() => {
     if (!isAuthenticated()) {
       router.push('/landing');
     } else {
       setIsAuthChecked(true);
+      // Get customer ID from user info (with browser cache)
+      const fetchUserInfo = async () => {
+        try {
+          // Try browser cache first
+          const cacheKey = 'user_info';
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            const { data, timestamp } = JSON.parse(cached);
+            // Use cache if less than 5 minutes old
+            if (Date.now() - timestamp < 5 * 60 * 1000 && data?.id) {
+              setCustomerId(data.id);
+            }
+          }
+          
+          // Fetch from API
+          const response = await apiClient.get(`${API_BASE}/auth/me`);
+          if (response.data?.id) {
+            setCustomerId(response.data.id);
+            // Save to browser cache
+            try {
+              const cacheData = {
+                data: response.data,
+                timestamp: Date.now(),
+              };
+              localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+            } catch (err) {
+              console.warn('Error saving user info to cache:', err);
+            }
+          }
+        } catch (err) {
+          console.error('Error fetching user info:', err);
+        }
+      };
+      fetchUserInfo();
+      
       // Check if we should show welcome screen (when coming from /auth)
       // Use a small delay to ensure sessionStorage is available
       const checkWelcome = () => {
@@ -200,6 +315,20 @@ export default function Home() {
       return () => clearTimeout(timer);
     }
   }, [router]);
+
+  // Load chat sessions when customerId is available
+  useEffect(() => {
+    if (customerId && isAuthChecked) {
+      // Try cache first for instant display
+      const cachedSessions = loadChatSessionsFromCache(customerId);
+      if (cachedSessions && cachedSessions.length > 0) {
+        setChatSessions(cachedSessions);
+      }
+      // Then fetch fresh data
+      loadChatSessions(customerId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, isAuthChecked]);
 
   useEffect(() => {
     const saved = localStorage.getItem('healthProfile');
@@ -310,6 +439,7 @@ export default function Home() {
         text: messageText,
         lang,
         profile,
+        session_id: currentSessionId, // Include current session ID to maintain context
       });
 
       const assistantMessage: ChatEntry = {
@@ -317,12 +447,30 @@ export default function Home() {
         role: 'assistant',
         content: response.data.answer,
         timestamp: formatTimestamp(),
-        citations: response.data.citations,
+        citations: Array.isArray(response.data.citations) ? response.data.citations : (response.data.citations ? [response.data.citations] : []),
         facts: response.data.facts,
         safety: response.data.safety,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+
+      // Update current session ID from response if provided
+      if (response.data.metadata?.session_id) {
+        setCurrentSessionId(response.data.metadata.session_id);
+      }
+
+      // Reload chat sessions after sending a message
+      if (customerId) {
+        // Clear browser cache to force refresh
+        try {
+          const cacheKey = `chat_sessions_${customerId}`;
+          localStorage.removeItem(cacheKey);
+        } catch (err) {
+          console.warn('Error clearing cache:', err);
+        }
+        // Reload sessions - function is stable (useCallback), safe to call directly
+        loadChatSessions(customerId);
+      }
 
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         const utterance = new SpeechSynthesisUtterance(response.data.answer);
@@ -348,7 +496,8 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  }, [inputValue, isLoading, lang, profile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputValue, isLoading, lang, profile, currentSessionId, customerId]);
 
   const handleDismissError = useCallback(() => {
     setError(null);
@@ -406,7 +555,7 @@ export default function Home() {
   const sidebarClasses = useMemo(
     () =>
       clsx(
-        'fixed inset-y-0 left-0 z-40 flex w-full max-w-xs flex-col gap-4 overflow-y-auto border-r border-white/10 bg-slate-900/60 px-4 py-6 shadow-[0_0_60px_rgba(16,185,129,0.18)] transition-transform duration-300 backdrop-blur-xl sm:w-72 sm:px-6 sm:py-8 md:gap-6 lg:z-30 lg:bg-slate-900/50 lg:shadow-none',
+        'fixed inset-y-0 left-0 z-40 flex w-full max-w-xs flex-col gap-4 border-r border-white/10 bg-slate-900/60 px-4 py-6 shadow-[0_0_60px_rgba(16,185,129,0.18)] transition-transform duration-300 backdrop-blur-xl sm:w-72 sm:px-6 sm:py-8 md:gap-6 lg:z-30 lg:bg-slate-900/50 lg:shadow-none',
         isSidebarOpen ? 'translate-x-0 lg:translate-x-0' : '-translate-x-full lg:-translate-x-full'
       ),
     [isSidebarOpen]
@@ -537,29 +686,113 @@ export default function Home() {
     setShowProfile(true);
   };
 
+  const handleDeleteSession = async (sessionId: string) => {
+    // Open confirmation modal
+    setDeleteConfirmModal({ isOpen: true, sessionId });
+  };
+
+  const confirmDeleteSession = async () => {
+    const sessionId = deleteConfirmModal.sessionId;
+    if (!sessionId) return;
+
+    try {
+      await apiClient.delete(`${API_BASE}/session/${sessionId}`);
+      
+      // Remove from local state
+      setChatSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      
+      // Clear browser cache for this customer's sessions
+      if (customerId) {
+        try {
+          const cacheKey = `chat_sessions_${customerId}`;
+          localStorage.removeItem(cacheKey);
+        } catch (err) {
+          console.warn('Error clearing browser cache:', err);
+        }
+      }
+      
+      // If this was the active session, clear it
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null);
+        setMessages([]);
+        setHasInteracted(false);
+      }
+    } catch (err: any) {
+      console.error('Error deleting session:', err);
+      setError('Failed to delete chat session');
+    }
+  };
+
   const handleSelectSession = async (sessionId: string) => {
     try {
-      // Fetch the session with messages
-      const response = await apiClient.get(`${API_BASE}/session/${sessionId}`);
-      const session = response.data;
+      // Try to load from cache first
+      const cacheKey = `session_messages_${sessionId}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const { data, timestamp } = JSON.parse(cached);
+          // Use cache if less than 5 minutes old
+          if (Date.now() - timestamp < 5 * 60 * 1000 && data && Array.isArray(data)) {
+            const chatEntries: ChatEntry[] = data.map((msg: any) => ({
+              id: msg.id,
+              role: msg.role,
+              content: msg.role === 'assistant' 
+                ? (msg.answer || msg.messageText || '') 
+                : (msg.messageText || msg.answer || ''),
+              timestamp: msg.createdAt || formatTimestamp(),
+              language: msg.language || lang,
+              route: msg.route,
+              safety: msg.safetyData,
+              facts: msg.facts,
+              citations: Array.isArray(msg.citations) ? msg.citations : (msg.citations ? [msg.citations] : []),
+            }));
+            setMessages(chatEntries);
+            setCurrentSessionId(sessionId);
+            setHasInteracted(true);
+            setError(null);
+            setIsSidebarOpen(false); // Close sidebar on mobile after selection
+          }
+        }
+      } catch (cacheErr) {
+        console.warn('Error loading from cache:', cacheErr);
+      }
+
+      // Fetch the session with messages from API
+      const response = await apiClient.get(`${API_BASE}/session/${sessionId}/messages?limit=1000`);
+      const messages = response.data || [];
       
-      if (session && session.messages) {
+      if (messages && Array.isArray(messages)) {
         // Convert session messages to ChatEntry format
-        const chatEntries: ChatEntry[] = session.messages.map((msg: any) => ({
+        const chatEntries: ChatEntry[] = messages.map((msg: any) => ({
           id: msg.id,
           role: msg.role,
-          content: msg.messageText || msg.answer || '',
+          content: msg.role === 'assistant' 
+            ? (msg.answer || msg.messageText || '') 
+            : (msg.messageText || msg.answer || ''),
           timestamp: msg.createdAt || formatTimestamp(),
           language: msg.language || lang,
           route: msg.route,
           safety: msg.safetyData,
           facts: msg.facts,
-          citations: msg.citations,
+          citations: Array.isArray(msg.citations) ? msg.citations : (msg.citations ? [msg.citations] : []),
         }));
         
         setMessages(chatEntries);
+        setCurrentSessionId(sessionId);
         setHasInteracted(true);
         setError(null);
+        setIsSidebarOpen(false); // Close sidebar on mobile after selection
+
+        // Save to cache
+        try {
+          const cacheData = {
+            data: messages,
+            timestamp: Date.now(),
+          };
+          localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+        } catch (cacheErr) {
+          console.warn('Error saving to cache:', cacheErr);
+        }
       }
     } catch (err: any) {
       console.error('Error loading session:', err);
@@ -574,6 +807,12 @@ export default function Home() {
         isOpen={showSearchChats}
         onClose={() => setShowSearchChats(false)}
         onSelectSession={handleSelectSession}
+        customerId={customerId}
+      />
+      <ConfirmDeleteModal
+        isOpen={deleteConfirmModal.isOpen}
+        onClose={() => setDeleteConfirmModal({ isOpen: false, sessionId: null })}
+        onConfirm={confirmDeleteSession}
       />
       <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(16,185,129,0.55),transparent_55%),radial-gradient(circle_at_85%_5%,rgba(34,197,94,0.4),transparent_55%),linear-gradient(180deg,rgba(2,6,23,0.92),rgba(2,6,23,0.95))]" />
@@ -595,46 +834,133 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex-1 space-y-5 pt-6">
-          <button
-            type="button"
-            onClick={() => {
-              setMessages([]);
-              setInputValue('');
-              setError(null);
-              setHasInteracted(false);
-            }}
-            className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-emerald-400/50 hover:bg-slate-800/70 hover:text-white"
-          >
-            <Plus className="h-4 w-4" />
-            <span>New chat</span>
-          </button>
+        <div className="flex-1 flex flex-col min-h-0 pt-2">
+          <div className="flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setMessages([]);
+                setInputValue('');
+                setError(null);
+                setHasInteracted(false);
+              }}
+              className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-emerald-400/50 hover:bg-slate-800/70 hover:text-white mb-1"
+            >
+              <Plus className="h-4 w-4" />
+              <span>New chat</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setShowSearchChats(true)}
-            className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-emerald-400/50 hover:bg-slate-800/70 hover:text-white"
-          >
-            <Search className="h-4 w-4" />
-            <span>Search chats</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setShowSearchChats(true)}
+              className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-emerald-400/50 hover:bg-slate-800/70 hover:text-white mb-5"
+            >
+              <Search className="h-4 w-4" />
+              <span>Search chats</span>
+            </button>
+          </div>
 
-          <div className="pt-2">
-            <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Chats</p>
-            <div className="space-y-1">
-              {/* Chat history will be displayed here */}
-              <div className="rounded-lg px-3 py-2 text-sm text-slate-300">
-                No chat history yet
-              </div>
+          <div className="flex-1 flex flex-col min-h-0 pt-2">
+            <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 flex-shrink-0">Chats</p>
+            <div className="overflow-y-auto overflow-x-hidden space-y-1 max-h-[320px] scrollbar-hide">
+              {sessionsLoading ? (
+                <div className="px-3">
+                  <LoadingSkeleton variant="chatHistory" count={3} />
+                </div>
+              ) : chatSessions.length === 0 ? (
+                <div className="rounded-lg px-3 py-2 text-sm text-slate-300">
+                  No chat history yet
+                </div>
+              ) : (
+                chatSessions.map((session) => {
+                  const formatDate = (dateString: string) => {
+                    const date = new Date(dateString);
+                    const now = new Date();
+                    const diffMs = now.getTime() - date.getTime();
+                    const diffMins = Math.floor(diffMs / 60000);
+                    const diffHours = Math.floor(diffMs / 3600000);
+                    const diffDays = Math.floor(diffMs / 86400000);
+
+                    if (diffMins < 1) return 'Just now';
+                    if (diffMins < 60) return `${diffMins}m ago`;
+                    if (diffHours < 24) return `${diffHours}h ago`;
+                    if (diffDays < 7) return `${diffDays}d ago`;
+                    return date.toLocaleDateString();
+                  };
+
+                  const isActive = currentSessionId === session.id;
+                  const sessionTitle = session.firstMessage 
+                    ? (session.firstMessage.length > 40 
+                        ? session.firstMessage.substring(0, 40) + '...' 
+                        : session.firstMessage)
+                    : 'New conversation';
+
+                  return (
+                    <div
+                      key={session.id}
+                      className={clsx(
+                        'group relative flex items-center gap-2 rounded-lg transition overflow-hidden w-full',
+                        isActive
+                          ? 'bg-emerald-500/20 border border-emerald-400/30'
+                          : 'border border-transparent hover:bg-slate-800/50'
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSession(session.id)}
+                        className={clsx(
+                          'flex-1 rounded-lg px-3 py-2 text-left text-sm transition overflow-hidden',
+                          isActive
+                            ? 'text-emerald-200'
+                            : 'text-slate-300 hover:text-white'
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2 w-full">
+                          <div className="flex-1 min-w-0 overflow-hidden">
+                            <p className="text-xs text-slate-400 mb-1 truncate">
+                              {formatDate(session.createdAt)}
+                            </p>
+                            <p className="font-medium truncate text-sm">
+                              {sessionTitle}
+                            </p>
+                            {session.language && (
+                              <p className="text-xs text-emerald-400/70 mt-1 truncate">
+                                {session.language.toUpperCase()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSession(session.id);
+                        }}
+                        className={clsx(
+                          'flex-shrink-0 rounded-lg p-2 transition opacity-0 group-hover:opacity-100',
+                          'text-slate-400 hover:text-red-400 hover:bg-red-500/10',
+                          isActive && 'opacity-100'
+                        )}
+                        aria-label="Delete session"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
           {error && !hasInteracted && (
-            <ErrorCallout message={error} onDismiss={handleDismissError} />
+            <div className="flex-shrink-0 pt-2">
+              <ErrorCallout message={error} onDismiss={handleDismissError} />
+            </div>
           )}
         </div>
 
-        <div className="mt-auto border-t border-white/10 pt-4">
+        <div className="flex-shrink-0 mt-auto border-t border-white/10 pt-4">
           <div className="flex items-center gap-3 px-3 py-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500 text-xs font-semibold text-white">
               <User className="h-4 w-4" />

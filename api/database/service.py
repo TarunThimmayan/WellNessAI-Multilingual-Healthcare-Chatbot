@@ -220,13 +220,51 @@ class DatabaseService:
             
             if result:
                 logger.debug(f"Cache HIT (L3 Database): Found matching response")
+                
+                # Parse JSONB fields if they're strings
+                safety_data = result["safety_data"]
+                if isinstance(safety_data, str):
+                    try:
+                        safety_data = json.loads(safety_data)
+                    except (json.JSONDecodeError, TypeError):
+                        safety_data = {}
+                elif safety_data is None:
+                    safety_data = {}
+                
+                facts_data = result["facts"]
+                if isinstance(facts_data, str):
+                    try:
+                        facts_data = json.loads(facts_data)
+                    except (json.JSONDecodeError, TypeError):
+                        facts_data = []
+                elif facts_data is None:
+                    facts_data = []
+                
+                citations_data = result["citations"]
+                if isinstance(citations_data, str):
+                    try:
+                        citations_data = json.loads(citations_data)
+                    except (json.JSONDecodeError, TypeError):
+                        citations_data = []
+                elif citations_data is None:
+                    citations_data = []
+                
+                metadata_data = result["metadata"]
+                if isinstance(metadata_data, str):
+                    try:
+                        metadata_data = json.loads(metadata_data)
+                    except (json.JSONDecodeError, TypeError):
+                        metadata_data = {}
+                elif metadata_data is None:
+                    metadata_data = {}
+                
                 return {
                     "answer": result["answer"],
                     "route": result["route"],
-                    "safety": result["safety_data"] or {},
-                    "facts": result["facts"] or [],
-                    "citations": result["citations"] or [],
-                    "metadata": result["metadata"] or {},
+                    "safety": safety_data,
+                    "facts": facts_data,
+                    "citations": citations_data,
+                    "metadata": metadata_data,
                     "language": result["language"],
                     "cached_at": result["created_at"].isoformat() if result["created_at"] else None,
                 }
@@ -327,6 +365,39 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error retrieving customer sessions: {e}", exc_info=True)
             return []
+    
+    @staticmethod
+    async def get_session_first_message(session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the first user message from a session (for display as title)
+        
+        Args:
+            session_id: Session ID
+            
+        Returns:
+            First user message dict or None
+        """
+        if not await db_client.ensure_connected():
+            logger.warning("Database not connected, cannot retrieve first message")
+            return None
+        
+        try:
+            messages = await db_client.fetch(
+                """
+                SELECT message_text, role
+                FROM chat_messages
+                WHERE session_id = $1 AND role = 'user'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                session_id
+            )
+            if messages:
+                return dict(messages[0])
+            return None
+        except Exception as e:
+            logger.error(f"Error retrieving first message: {e}", exc_info=True)
+            return None
     
     @staticmethod
     async def get_session_messages(
@@ -462,6 +533,39 @@ class DatabaseService:
             return None
     
     @staticmethod
+    async def get_all_customers(limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get all customers from the database"""
+        if not await db_client.ensure_connected():
+            return []
+        
+        try:
+            customers = await db_client.fetch(
+                """
+                SELECT 
+                    id,
+                    email,
+                    role,
+                    age,
+                    sex,
+                    diabetes,
+                    hypertension,
+                    pregnancy,
+                    city,
+                    is_active,
+                    created_at,
+                    last_login
+                FROM customers
+                ORDER BY created_at DESC
+                LIMIT $1
+                """,
+                limit
+            )
+            return [dict(customer) for customer in customers]
+        except Exception as e:
+            logger.error(f"Error retrieving all customers: {e}", exc_info=True)
+            return []
+    
+    @staticmethod
     async def update_customer_last_login(customer_id: str) -> None:
         """Update customer's last login time"""
         if not await db_client.ensure_connected():
@@ -530,6 +634,36 @@ class DatabaseService:
             )
         except Exception as e:
             logger.error(f"Error revoking refresh token: {e}", exc_info=True)
+    
+    @staticmethod
+    async def delete_session(session_id: str) -> bool:
+        """
+        Delete a chat session and all its messages
+        
+        Args:
+            session_id: Session ID to delete
+            
+        Returns:
+            True if deleted, False otherwise
+        """
+        if not await db_client.ensure_connected():
+            return False
+        
+        try:
+            # Delete all messages first (CASCADE should handle this, but being explicit)
+            await db_client.execute(
+                "DELETE FROM chat_messages WHERE session_id = $1",
+                session_id
+            )
+            # Delete the session
+            result = await db_client.execute(
+                "DELETE FROM chat_sessions WHERE id = $1",
+                session_id
+            )
+            return result == "DELETE 1"
+        except Exception as e:
+            logger.error(f"Error deleting session: {e}", exc_info=True)
+            return False
 
 
 # Global service instance

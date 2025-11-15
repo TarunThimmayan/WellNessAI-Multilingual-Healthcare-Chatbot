@@ -12,7 +12,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
-from deep_translator import GoogleTranslator  # type: ignore
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends
 from fastapi.encoders import jsonable_encoder
@@ -35,12 +34,6 @@ try:
 except Exception:  # pragma: no cover
     gTTS = None
 
-try:
-    from indic_transliteration import sanscript  # type: ignore
-    from indic_transliteration.sanscript import transliterate  # type: ignore
-except Exception:  # pragma: no cover
-    sanscript = None
-    transliterate = None
 
 def _load_environment() -> None:
     """
@@ -81,8 +74,7 @@ from .graph.cypher import (
     get_safe_actions_for_metabolic_conditions as neo4j_get_safe_actions,
 )
 from .graph.client import neo4j_client
-from .services.indic_translator import IndicTransService
-from .database import prisma_client, db_service
+from .database import db_client, db_service
 from .auth.routes import router as auth_router
 from .auth.middleware import require_auth, require_role
 from .pipeline_functions import (
@@ -91,8 +83,6 @@ from .pipeline_functions import (
     translate_to_user_language,
 )
 from .services.cache import cache_service
-
-indic_translator = IndicTransService()
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -112,7 +102,7 @@ async def _startup() -> None:
     """Initialize persistent database connection pool and cache on startup"""
     try:
         # Initialize PostgreSQL connection pool (persistent, stays alive)
-        connected = await prisma_client.connect()
+        connected = await db_client.connect()
         if connected:
             logger.info("PostgreSQL connection pool initialized successfully (persistent connection)")
         else:
@@ -122,10 +112,36 @@ async def _startup() -> None:
         logger.warning("Database not connected - chat history will not be saved")
     
     # Initialize cache service (Redis)
+    # Force re-initialization to ensure connection is established
+    logger.info("Initializing Redis cache (L2)...")
+    cache_service.ensure_redis_connection()
+    
+    # Give it a moment to connect
+    import asyncio
+    await asyncio.sleep(0.1)
+    
     if cache_service.is_available():
         logger.info("Redis cache (L2) initialized successfully")
     else:
         logger.warning("Redis cache (L2) not available - caching will use L1 and L3 only")
+        # Log more details about why Redis is not available
+        redis_uri = os.getenv("REDIS_URI")
+        if not redis_uri:
+            logger.warning("REDIS_URI environment variable is not set")
+            logger.warning("Make sure REDIS_URI is set in your .env file")
+        else:
+            logger.info(f"REDIS_URI is set: {redis_uri[:30]}...")
+            logger.warning("Check Redis connection logs above for connection errors")
+            # Try one more time with explicit initialization
+            logger.info("Attempting explicit Redis re-initialization...")
+            try:
+                cache_service._init_redis()
+                if cache_service.is_available():
+                    logger.info("Redis cache (L2) initialized successfully after retry")
+                else:
+                    logger.error("Redis initialization failed even after retry")
+            except Exception as e:
+                logger.error(f"Redis initialization error: {e}", exc_info=True)
 
 
 @app.on_event("shutdown")
@@ -135,7 +151,7 @@ async def _shutdown() -> None:
     if neo4j_client.driver:
         neo4j_client.close()
     # Close PostgreSQL connection pool
-    await prisma_client.disconnect()
+    await db_client.disconnect()
     logger.info("Database connections closed")
 
 app.add_middleware(
@@ -400,24 +416,8 @@ def detect_language(text: str) -> str:
 
 
 def translate_text(text: str, target_lang: str, src_lang: Optional[str] = None) -> str:
-    if not text.strip():
-        return text
-
-    if src_lang and src_lang == target_lang:
-        return text
-
-    try:
-        translator = GoogleTranslator(
-            source=src_lang if src_lang else "auto",
-            target=target_lang,
-        )
-        return translator.translate(text)
-    except Exception as exc:
-        logger.warning(
-            "Translation error",
-            extra={"source": src_lang or "auto", "target": target_lang, "error": str(exc)},
-        )
-        return text
+    """Translation is disabled - returns text as-is."""
+    return text
 
 
 def is_mostly_ascii(text: str) -> bool:
@@ -444,15 +444,7 @@ def detect_romanized_language(text: str) -> Optional[str]:
 
 
 def attempt_native_script_conversion(text: str, lang: str) -> Optional[str]:
-    try:
-        converted = GoogleTranslator(source=lang, target=lang).translate(text)
-        if converted and converted.strip().lower() != text.strip().lower():
-            return converted
-    except Exception as exc:
-        logger.debug(
-            "Native script conversion failed",
-            extra={"lang": lang, "error": str(exc)},
-        )
+    """Native script conversion is disabled."""
     return None
 
 
@@ -460,59 +452,15 @@ def translate_romanized_to_english(
     text: str, lang: str
 ) -> Tuple[str, Optional[str], Dict[str, Any]]:
     """
-    Translate romanized Indic text to English. Tries IndicTrans2 first (if available),
-    then falls back to Google Translate heuristics.
+    Translation is disabled - returns text as-is.
     """
-    meta: Dict[str, Any] = {"attempts": []}
-
-    if indic_translator.is_enabled():
-        result = indic_translator.translate_romanized_to_english(text, lang)
-        meta["attempts"].append(
-            {
-                "provider": "indictrans2",
-                "success": result.success,
-                **result.details,
-            }
-        )
-        if result.success and result.translated_text:
-            meta["provider"] = "indictrans2"
-            return result.translated_text or text, result.native_script, meta
-
-    initial = translate_text(text, target_lang="en", src_lang=lang)
-    if initial.strip().lower() != text.strip().lower():
-        meta["provider"] = "google_translate"
-        meta["attempts"].append(
-            {
-                "provider": "google_translate",
-                "success": True,
-                "native_script_conversion": False,
-            }
-        )
-        return initial, None, meta
-
-    native_script = attempt_native_script_conversion(text, lang)
-    if native_script:
-        translated = translate_text(native_script, target_lang="en", src_lang=lang)
-        meta["provider"] = "google_translate"
-        meta["attempts"].append(
-            {
-                "provider": "google_translate",
-                "success": True,
-                "native_script_conversion": True,
-            }
-        )
-        return translated, native_script, meta
-
-    meta["provider"] = "google_translate"
-    meta["attempts"].append(
-        {
-            "provider": "google_translate",
-            "success": True,
-            "native_script_conversion": False,
-            "note": "direct passthrough (no better translation available)",
-        }
-    )
-    return initial, None, meta
+    meta: Dict[str, Any] = {
+        "provider": "none",
+        "success": False,
+        "reason": "translation_disabled",
+        "attempts": []
+    }
+    return text, None, meta
 
 
 def romanize_text(text: str, lang: str) -> str:
@@ -622,39 +570,17 @@ def localize_text(
     response_style: str = "native",
     capture_meta: Optional[Dict[str, Any]] = None,
 ) -> str:
-    meta: Dict[str, Any] = {}
-
-    if target_lang == src_lang:
-        meta.update({"provider": "identity", "success": True})
-        if capture_meta is not None:
-            capture_meta.update(meta)
-        return text
-
-    translated = None
-
-    if src_lang == "en" and indic_translator.is_enabled():
-        result = indic_translator.translate_english_to_local(text, target_lang)
-        meta = {
-            "provider": result.provider,
-            "success": result.success,
-            **result.details,
-        }
-        if result.success and result.translated_text:
-            translated = result.translated_text
-
-    if translated is None:
-        translated = translate_text(text, target_lang=target_lang, src_lang=src_lang)
-        meta.setdefault("provider", "google_translate")
-        meta.setdefault("success", True)
-        meta.setdefault("reason", "fallback_to_google")
-
-    if response_style == "romanized" and target_lang != "en":
-        translated = romanize_text(translated, target_lang)
-
+    """Translation is disabled - returns text as-is."""
+    meta: Dict[str, Any] = {
+        "provider": "none",
+        "success": False,
+        "reason": "translation_disabled",
+    }
+    
     if capture_meta is not None:
         capture_meta.update(meta)
-
-    return translated
+    
+    return text
 
 
 def get_language_label(code: str, response_style: str = "native") -> str:
@@ -1120,7 +1046,7 @@ async def health_check():
             "graph": ensure_neo4j(),
             "graph_fallback": True,
             "safety": True,
-            "database": prisma_client.is_connected()
+            "database": db_client.is_connected()
         }
     }
 
@@ -1157,38 +1083,53 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
     profile: Profile = request.profile
     personalization_notes = build_personalization_notes(profile)
     
+    # Set default response_style if not provided in request
+    response_style = getattr(request, "response_style", "native")
+    
     # ============================================================
-    # STEP 1: Language Detection (Separate from Translation)
+    # STEP 1: GPT-4o-mini → Detect Language + Translate to English
     # ============================================================
     detection_start = time.perf_counter()
     openai_client = get_openai_client()
     model = _chat_model_openai
     
-    # Detect language first (separate stage)
-    if openai_client and model:
-        from .pipeline_functions import detect_language_only, translate_to_english
-        detected_lang = detect_language_only(
-            client=openai_client,
-            model=model,
-            user_text=text
-        )
-    else:
-        # Fallback to old method if OpenAI client not available
-        logger.warning("OpenAI client not available, using fallback language detection")
-        detected_lang = detect_language(text) if text else DEFAULT_LANG
-        detected_lang = detected_lang if detected_lang in SUPPORTED_LANG_CODES else DEFAULT_LANG
+    # Import pipeline functions at the top to ensure they're available
+    from .pipeline_functions import detect_language_only, translate_to_english
+    
+    # First check for romanized text (Tanglish, Hinglish, etc.) - fast heuristic
+    detected_lang = None
+    romanized_lang = detect_romanized_language(text)
+    if romanized_lang:
+        detected_lang = romanized_lang
+        logger.info(f"Detected romanized language: {detected_lang} for text: {text[:50]}...")
+    
+    # If not romanized, use GPT-4o-mini for language detection
+    if not detected_lang:
+        if openai_client and model:
+            detected_lang = detect_language_only(
+                client=openai_client,
+                model=model,
+                user_text=text
+            )
+            logger.debug(f"GPT-4o-mini detected language: {detected_lang}")
+        else:
+            # Fallback to old method if OpenAI client not available
+            logger.warning("OpenAI client not available, using fallback language detection")
+            detected_lang = detect_language(text) if text else DEFAULT_LANG
+            detected_lang = detected_lang if detected_lang in SUPPORTED_LANG_CODES else DEFAULT_LANG
     
     # Use requested language if provided, otherwise use detected
     requested_lang_raw = request.lang if request.lang in SUPPORTED_LANG_CODES else None
     target_lang = requested_lang_raw or detected_lang or DEFAULT_LANG
     
-    # ============================================================
-    # STEP 1.5: Translation to English (SKIP if English detected)
-    # ============================================================
+    # Log final detected language (for debugging)
+    logger.info(f"Language detection complete - detected_lang: {detected_lang}, target_lang: {target_lang}, will translate back to: {detected_lang}")
+    
+    # Translate to English using GPT-4o-mini (SKIP if English detected)
     if detected_lang == "en":
         # Skip translation entirely if English detected - optimize pipeline
         processed_text = text
-        logger.debug("English detected - skipping translation step")
+        logger.debug("English detected - skipping translation to English step")
     else:
         # Translate to English only if not English
         if openai_client and model:
@@ -1221,8 +1162,9 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
     timings["safety_analysis"] = time.perf_counter() - safety_start
 
     # Translate mental health and pregnancy alerts if needed (skip if English detected)
+    # Use detected_lang (not target_lang) to respond in the language user typed in
     mental_health_display = mental_health_en
-    if detected_lang != "en" and target_lang != "en" and mental_health_en["first_aid"] and openai_client and model:
+    if detected_lang != "en" and mental_health_en["first_aid"] and openai_client and model:
         # Translate first aid steps
         translated_first_aid = []
         for step in mental_health_en["first_aid"]:
@@ -1230,7 +1172,7 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
                 client=openai_client,
                 model=model,
                 english_text=step,
-                target_language=target_lang,
+                target_language=detected_lang,
             )
             translated_first_aid.append(translated)
         mental_health_display = {
@@ -1239,18 +1181,21 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
         }
 
     pregnancy_guidance_display = PREGNANCY_ALERT_GUIDANCE_EN
-    if detected_lang != "en" and target_lang != "en" and openai_client and model:
+    if detected_lang != "en" and openai_client and model:
         pregnancy_guidance_display = translate_to_user_language(
             client=openai_client,
             model=model,
             english_text="\n".join(PREGNANCY_ALERT_GUIDANCE_EN),
-            target_language=target_lang,
+            target_language=detected_lang,
         ).split("\n")
     pregnancy_alert_display = {
         **pregnancy_alert_en,
         "guidance": pregnancy_guidance_display,
     }
 
+    # ============================================================
+    # STEP 3: Neo4j (Knowledge graph fallback)
+    # ============================================================
     use_graph = is_graph_intent(processed_text)
 
     facts_en: List[Dict[str, Any]] = []
@@ -1377,6 +1322,9 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
             if providers:
                 facts_en.append({"type": "providers", "data": providers})
         
+        # ============================================================
+        # STEP 2: ChromaDB (Semantic search)
+        # ============================================================
         rag_start = time.perf_counter()
         rag_results = retrieve(processed_text, k=3)
         timings["retrieval"] = time.perf_counter() - rag_start
@@ -1412,7 +1360,7 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
                 facts_en.append({"type": "personalization", "data": personalization_notes})
 
         # ============================================================
-        # STEP 4: Generate Final Answer in English
+        # STEP 4: GPT-4o-mini → Final reasoning + Generate answer in English
         # ============================================================
         generation_start = time.perf_counter()
         
@@ -1438,23 +1386,29 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
             )
         
         # ============================================================
-        # STEP 5: Translate Answer Back to User's Language
+        # STEP 5: GPT-4o-mini → Translate answer back to user's language (native script)
+        # SKIP if English detected
         # ============================================================
         translation_start = time.perf_counter()
         
         # Skip translation back if English was detected (optimization)
+        # Use detected_lang (not target_lang) to respond in the language user typed in
         if detected_lang == "en":
             answer = answer_en
-        elif target_lang != "en" and openai_client and model:
-            # Translate to user's language (always native script)
+            logger.debug("English detected - skipping translation back to user's language step")
+        elif detected_lang != "en" and openai_client and model:
+            # Translate to user's detected language (always native script, not romanized)
+            logger.info(f"Translating answer back to {detected_lang} (native script)")
             answer = translate_to_user_language(
                 client=openai_client,
                 model=model,
                 english_text=answer_en,
-                target_language=target_lang,
+                target_language=detected_lang,
             )
+            logger.debug(f"Translation complete - answer length: {len(answer)} characters")
         else:
             answer = answer_en
+            logger.warning(f"Translation skipped - detected_lang: {detected_lang}, openai_client: {bool(openai_client)}, model: {model}")
         
         timings["answer_generation"] = time.perf_counter() - generation_start
         timings["answer_translation"] = time.perf_counter() - translation_start
@@ -1464,10 +1418,14 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
         debug_info["answer_localized"] = answer
         
     else:
+        # ============================================================
+        # STEP 2: ChromaDB (Semantic search)
+        # ============================================================
         rag_start = time.perf_counter()
         rag_results = retrieve(processed_text, k=4)
         timings["retrieval"] = time.perf_counter() - rag_start
-        debug_info["rag_context_snippets"] = [r["chunk"][:200] for r in rag_results]
+        debug_info["rag_context_snippets"] = [r["chunk"][:200] for r in rag_results] if rag_results else []
+        
         if not rag_results:
             answer_en = (
                 "I don't have enough information from my sources. "
@@ -1520,7 +1478,7 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
                 facts_en.append({"type": "personalization", "data": personalization_notes})
 
             # ============================================================
-            # STEP 4: Generate Final Answer in English
+            # STEP 4: GPT-4o-mini → Final reasoning + Generate answer in English
             # ============================================================
             generation_start = time.perf_counter()
             
@@ -1546,23 +1504,29 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
                 )
             
             # ============================================================
-            # STEP 5: Translate Answer Back to User's Language
+            # STEP 5: GPT-4o-mini → Translate answer back to user's language (native script)
+            # SKIP if English detected
             # ============================================================
             translation_start = time.perf_counter()
             
             # Skip translation back if English was detected (optimization)
+            # Use detected_lang (not target_lang) to respond in the language user typed in
             if detected_lang == "en":
                 answer = answer_en
-            elif target_lang != "en" and openai_client and model:
-                # Translate to user's language (always native script)
+                logger.debug("English detected - skipping translation back to user's language step")
+            elif detected_lang != "en" and openai_client and model:
+                # Translate to user's detected language (always native script, not romanized)
+                logger.info(f"Translating answer back to {detected_lang} (native script)")
                 answer = translate_to_user_language(
                     client=openai_client,
                     model=model,
                     english_text=answer_en,
-                    target_language=target_lang,
+                    target_language=detected_lang,
                 )
+                logger.debug(f"Translation complete - answer length: {len(answer)} characters")
             else:
                 answer = answer_en
+                logger.warning(f"Translation skipped - detected_lang: {detected_lang}, openai_client: {bool(openai_client)}, model: {model}")
             
             timings["answer_generation"] = time.perf_counter() - generation_start
             timings["answer_translation"] = time.perf_counter() - translation_start
@@ -1573,15 +1537,16 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
 
     if not safety_result["red_flag"]:
         # Translate disclaimer to user's language (skip if English detected)
+        # Use detected_lang (not target_lang) to respond in the language user typed in
         disclaimer_en = DISCLAIMER_EN
         if detected_lang == "en":
             disclaimer = disclaimer_en
-        elif target_lang != "en" and openai_client and model:
+        elif detected_lang != "en" and openai_client and model:
             disclaimer = translate_to_user_language(
                 client=openai_client,
                 model=model,
                 english_text=disclaimer_en,
-                target_language=target_lang,
+                target_language=detected_lang,
             )
         else:
             disclaimer = disclaimer_en
@@ -1660,7 +1625,7 @@ async def chat(
         customer_id = user.get("user_id") or request.customer_id
         session_id = request.session_id
         
-        if prisma_client.is_connected():
+        if db_client.is_connected():
             try:
                 # Update authenticated user's profile if needed
                 profile_data = request.profile.model_dump(exclude_none=True)
@@ -1676,7 +1641,11 @@ async def chat(
                 if profile_data:
                     customer = await db_service.update_customer_profile(customer_id, profile_data)
                 
-                customer_id = customer.id
+                # Handle both dict and object responses
+                if isinstance(customer, dict):
+                    customer_id = customer.get("id") or customer_id
+                else:
+                    customer_id = getattr(customer, "id", customer_id)
                 
                 # Get or create session
                 chat_session = await db_service.get_or_create_session(
@@ -1700,90 +1669,7 @@ async def chat(
             except Exception as e:
                 logger.warning(f"Failed to save customer/session data: {e}", exc_info=True)
         
-        # ============================================================
-        # 3-LEVEL CACHING: Check cache before processing
-        # ============================================================
-        cache_key = cache_service.generate_cache_key(
-            text=request.text,
-            lang=request.lang,
-            profile=request.profile.model_dump(exclude_none=True)
-        )
-        
-        cached_response = None
-        cache_level = None
-        
-        # L2: Check Redis cache
-        if cache_service.is_available():
-            cached_response = await cache_service.get_from_cache(cache_key)
-            if cached_response:
-                cache_level = "L2-Redis"
-                logger.info(f"Cache HIT ({cache_level}): {cache_key[:30]}...")
-        
-        # L3: Check Database cache if L2 missed
-        if not cached_response and prisma_client.is_connected():
-            cached_response = await db_service.get_cached_chat_response(
-                text=request.text,
-                profile=request.profile.model_dump(exclude_none=True),
-                lang=request.lang
-            )
-            if cached_response:
-                cache_level = "L3-Database"
-                logger.info(f"Cache HIT ({cache_level}): Found in database")
-                # Store in L2 (Redis) for faster future access
-                if cache_service.is_available():
-                    await cache_service.set_to_cache(cache_key, cached_response)
-        
-        # If cache hit, return cached response
-        if cached_response:
-            from .models import ChatResponse, Safety, Fact
-            from fastapi.responses import Response
-            
-            # Reconstruct response object from cache
-            response = ChatResponse(
-                answer=cached_response["answer"],
-                route=cached_response.get("route", "vector"),
-                safety=Safety(**cached_response.get("safety", {})),
-                facts=[Fact(**f) for f in cached_response.get("facts", [])],
-                citations=cached_response.get("citations", []),
-                metadata={
-                    **cached_response.get("metadata", {}),
-                    "cache_level": cache_level,
-                    "cached": True,
-                }
-            )
-            
-            # Add customer_id and session_id to response metadata
-            if customer_id:
-                response.metadata["customer_id"] = customer_id
-            if session_id:
-                response.metadata["session_id"] = session_id
-            
-            # Add L1 cache headers (browser storage) with content hash for proper ETag
-            response_data = response.model_dump()
-            content_hash = cache_service._generate_content_hash(response_data)
-            cache_headers = cache_service.get_cache_headers(cache_hit=True, content_hash=content_hash)
-            
-            # Create response with cache headers
-            from fastapi.responses import JSONResponse
-            json_response = JSONResponse(content=response_data)
-            for header, value in cache_headers.items():
-                json_response.headers[header] = value
-            
-            logger.info(
-                "Returning cached response",
-                extra={
-                    "cache_level": cache_level,
-                    "customer_id": customer_id,
-                    "session_id": session_id,
-                }
-            )
-            return json_response
-        
-        # Cache miss - process request normally
-        logger.debug(f"Cache MISS: Processing new request")
-        cache_service._record_stat("misses", "MISS")
-        
-        # Process chat request
+        # Process chat request (no caching for chat responses)
         response, target_lang, timings = process_chat_request(request)
         
         # Save assistant response to database (L3 cache)
@@ -1804,23 +1690,31 @@ async def chat(
                     citations=response.citations,
                     metadata=response.metadata,
                 )
+                
+                # Invalidate cache for customer sessions and session messages after saving
+                try:
+                    if customer_id:
+                        # Invalidate customer sessions cache (all limits)
+                        for limit_val in [10, 50, 100, 200, 500, 1000]:
+                            cache_key = f"sessions:{customer_id}:{limit_val}"
+                            await cache_service.delete(cache_key)
+                            logger.debug(f"Invalidated cache: {cache_key}")
+                    
+                    # Invalidate session messages cache (all limits)
+                    if session_id:
+                        for limit_val in [10, 50, 100, 200, 500, 1000]:
+                            cache_key = f"session_messages:{session_id}:{limit_val}"
+                            await cache_service.delete(cache_key)
+                            logger.debug(f"Invalidated cache: {cache_key}")
+                        # Invalidate full session cache
+                        await cache_service.delete(f"session_full:{session_id}")
+                        logger.debug(f"Invalidated cache: session_full:{session_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to invalidate cache: {e}")
             except Exception as e:
                 logger.warning(f"Failed to save chat message: {e}", exc_info=True)
         
-        # Store in L2 cache (Redis) for faster future access
-        if cache_service.is_available():
-            try:
-                cache_data = {
-                    "answer": response.answer,
-                    "route": response.route,
-                    "safety": response.safety.model_dump() if hasattr(response.safety, 'model_dump') else dict(response.safety),
-                    "facts": [f.model_dump() if hasattr(f, 'model_dump') else dict(f) for f in response.facts],
-                    "citations": response.citations,
-                    "metadata": response.metadata,
-                }
-                await cache_service.set_to_cache(cache_key, cache_data)
-            except Exception as e:
-                logger.warning(f"Failed to store in Redis cache: {e}")
+        # Note: Chat responses are NOT cached - only dynamic content (sessions, messages) is cached
         
         # Add customer_id and session_id to response metadata
         if customer_id:
@@ -1838,18 +1732,13 @@ async def chat(
                 "timings": timings,
                 "customer_id": customer_id,
                 "session_id": session_id,
-                "cache_level": "MISS",
             },
         )
         
-        # Add L1 cache headers (browser storage) for cache miss with content hash
+        # Return response (no caching for chat responses)
         from fastapi.responses import JSONResponse
         response_data = response.model_dump()
-        content_hash = cache_service._generate_content_hash(response_data)
-        cache_headers = cache_service.get_cache_headers(cache_hit=False, content_hash=content_hash)
         json_response = JSONResponse(content=response_data)
-        for header, value in cache_headers.items():
-            json_response.headers[header] = value
         
         return json_response
     except HTTPException:
@@ -1956,7 +1845,7 @@ async def voice_chat(
         )
 
         # Save customer data to database (same logic as chat endpoint)
-        if prisma_client.is_connected():
+        if db_client.is_connected():
             try:
                 profile_data = chat_request.profile.model_dump(exclude_none=True)
                 
@@ -2068,6 +1957,7 @@ async def get_customer(
     Get customer information
     Requires authentication
     Users can only view their own profile, admins can view any profile
+    Cached in Redis for 5 minutes
     """
     # Validate path parameter to prevent SQL injection
     from .auth.validation import validate_uuid
@@ -2076,7 +1966,7 @@ async def get_customer(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-    if not prisma_client.is_connected():
+    if not db_client.is_connected():
         raise HTTPException(status_code=503, detail="Database not available")
     
     # Check if user is accessing their own profile or is admin
@@ -2088,6 +1978,13 @@ async def get_customer(
             status_code=403,
             detail="You can only view your own profile"
         )
+    
+    # Try to get from Redis cache first
+    cache_key = f"customer:{customer_id}"
+    cached_customer = await cache_service.get(cache_key)
+    if cached_customer is not None:
+        logger.debug(f"Cache hit for customer: {customer_id}")
+        return cached_customer
     
     customer = await db_service.get_customer(customer_id)
     if not customer:
@@ -2108,7 +2005,7 @@ async def get_customer(
     elif medical_conditions is None:
         medical_conditions = []
     
-    return {
+    result = {
         "id": customer["id"],
         "email": customer["email"],
         "createdAt": customer["created_at"].isoformat() if customer.get("created_at") else None,
@@ -2123,6 +2020,70 @@ async def get_customer(
         "metadata": customer.get("metadata"),
         "sessionCount": session_count,
     }
+    
+    # Cache the result for 5 minutes (300 seconds)
+    await cache_service.set(cache_key, result, ttl=300)
+    
+    return result
+
+
+@app.get("/admin/users")
+async def list_all_users(
+    limit: int = 1000,
+    user: dict = Depends(require_role(["admin"]))
+):
+    """
+    List all users (Admin only)
+    
+    Returns a list of all users in the database with their details
+    """
+    if not db_client.is_connected():
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        from .auth.validation import validate_query_limit
+        limit = validate_query_limit(limit)
+        
+        customers = await db_service.get_all_customers(limit=limit)
+        
+        # Format the response
+        users_list = []
+        for customer in customers:
+            # Parse medical_conditions from JSONB if it exists
+            medical_conditions = customer.get("medical_conditions")
+            if isinstance(medical_conditions, str):
+                try:
+                    medical_conditions = json.loads(medical_conditions)
+                except:
+                    medical_conditions = []
+            elif medical_conditions is None:
+                medical_conditions = []
+            
+            users_list.append({
+                "id": customer["id"],
+                "email": customer["email"],
+                "role": customer.get("role", "user"),
+                "age": customer.get("age"),
+                "sex": customer.get("sex"),
+                "diabetes": customer.get("diabetes", False),
+                "hypertension": customer.get("hypertension", False),
+                "pregnancy": customer.get("pregnancy", False),
+                "city": customer.get("city"),
+                "is_active": customer.get("is_active", True),
+                "created_at": customer["created_at"].isoformat() if customer.get("created_at") else None,
+                "last_login": customer["last_login"].isoformat() if customer.get("last_login") else None,
+                "medical_conditions": medical_conditions,
+            })
+        
+        return {
+            "total": len(users_list),
+            "users": users_list
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing users: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve users")
 
 
 @app.get("/customer/{customer_id}/sessions")
@@ -2135,16 +2096,17 @@ async def get_customer_sessions(
     Get chat sessions for a customer
     Requires authentication
     Users can only view their own sessions, admins can view any sessions
+    Cached in Redis for 5 minutes
     """
     # Validate path parameter to prevent SQL injection
     from .auth.validation import validate_uuid, validate_query_limit
     try:
         customer_id = validate_uuid(customer_id)
-        limit = validate_query_limit(limit, max_limit=100, min_limit=1)
+        limit = validate_query_limit(limit, max_limit=1000, min_limit=1)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-    if not prisma_client.is_connected():
+    if not db_client.is_connected():
         raise HTTPException(status_code=503, detail="Database not available")
     
     # Check if user is accessing their own sessions or is admin
@@ -2157,9 +2119,19 @@ async def get_customer_sessions(
             detail="You can only view your own sessions"
         )
     
+    # Try to get from Redis cache first
+    cache_key = f"sessions:{customer_id}:{limit}"
+    cached_result = await cache_service.get(cache_key)
+    if cached_result is not None:
+        logger.debug(f"Cache hit for customer sessions: {customer_id}")
+        return cached_result
+    
+    # If not in cache, fetch from database
     sessions = await db_service.get_customer_sessions(customer_id, limit=limit)
     result = []
     for session in sessions:
+        # Get first user message for title
+        first_message = await db_service.get_session_first_message(session["id"])
         # Get message count for this session
         messages = await db_service.get_session_messages(session["id"], limit=1000)
         result.append({
@@ -2170,7 +2142,12 @@ async def get_customer_sessions(
             "language": session.get("language"),
             "sessionMetadata": session.get("session_metadata"),
             "messageCount": len(messages),
+            "firstMessage": first_message.get("message_text") if first_message else None,
         })
+    
+    # Cache the result for 5 minutes (300 seconds)
+    await cache_service.set(cache_key, result, ttl=300)
+    
     return result
 
 
@@ -2189,11 +2166,11 @@ async def get_session_messages(
     from .auth.validation import validate_uuid, validate_query_limit
     try:
         session_id = validate_uuid(session_id)
-        limit = validate_query_limit(limit, max_limit=200, min_limit=1)
+        limit = validate_query_limit(limit, max_limit=1000, min_limit=1)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-    if not prisma_client.is_connected():
+    if not db_client.is_connected():
         raise HTTPException(status_code=503, detail="Database not available")
     
     # Verify session belongs to user (unless admin)
@@ -2212,8 +2189,16 @@ async def get_session_messages(
                 detail="You can only view messages from your own sessions"
             )
     
+    # Try to get from Redis cache first
+    cache_key = f"session_messages:{session_id}:{limit}"
+    cached_messages = await cache_service.get(cache_key)
+    if cached_messages is not None:
+        logger.debug(f"Cache hit for session messages: {session_id}")
+        return cached_messages
+    
+    # If not in cache, fetch from database
     messages = await db_service.get_session_messages(session_id, limit=limit)
-    return [
+    result = [
         {
             "id": message["id"],
             "sessionId": message["session_id"],
@@ -2230,6 +2215,72 @@ async def get_session_messages(
         }
         for message in messages
     ]
+    
+    # Cache the result for 5 minutes (300 seconds)
+    await cache_service.set(cache_key, result, ttl=300)
+    
+    return result
+
+
+@app.delete("/session/{session_id}")
+async def delete_session(
+    session_id: str,
+    user: dict = Depends(require_auth)
+):
+    """
+    Delete a chat session and all its messages
+    Requires authentication
+    Users can only delete their own sessions, admins can delete any session
+    """
+    # Validate path parameter to prevent SQL injection
+    from .auth.validation import validate_uuid
+    try:
+        session_id = validate_uuid(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    if not db_client.is_connected():
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    # Verify session belongs to user (unless admin)
+    user_role = user.get("role", "user")
+    user_id = user.get("user_id")
+    
+    if user_role != "admin":
+        # Get session to verify ownership
+        session = await db_service.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        if session.get("customer_id") != user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only delete your own sessions"
+            )
+    
+    # Delete the session
+    deleted = await db_service.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+    
+    # Invalidate cache for customer sessions and session data
+    if cache_service.is_available():
+        try:
+            if user_id:
+                # Invalidate customer sessions cache (all limits)
+                for limit_val in [10, 50, 100, 200, 500, 1000]:
+                    cache_key = f"sessions:{user_id}:{limit_val}"
+                    await cache_service.delete(cache_key)
+            # Invalidate session messages cache (all limits)
+            for limit_val in [10, 50, 100, 200, 500, 1000]:
+                cache_key = f"session_messages:{session_id}:{limit_val}"
+                await cache_service.delete(cache_key)
+            # Invalidate full session cache
+            await cache_service.delete(f"session_full:{session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to invalidate cache after session deletion: {e}")
+    
+    return {"success": True, "message": "Session deleted successfully"}
 
 
 @app.get("/session/{session_id}")
@@ -2241,6 +2292,7 @@ async def get_session(
     Get session information with messages
     Requires authentication
     Users can only view their own sessions, admins can view any session
+    Cached in Redis for 5 minutes
     """
     # Validate path parameter to prevent SQL injection
     from .auth.validation import validate_uuid
@@ -2249,8 +2301,23 @@ async def get_session(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-    if not prisma_client.is_connected():
+    if not db_client.is_connected():
         raise HTTPException(status_code=503, detail="Database not available")
+    
+    # Try to get from Redis cache first
+    cache_key = f"session_full:{session_id}"
+    cached_session = await cache_service.get(cache_key)
+    if cached_session is not None:
+        logger.debug(f"Cache hit for session: {session_id}")
+        # Verify session belongs to user (unless admin)
+        user_role = user.get("role", "user")
+        user_id = user.get("user_id")
+        if user_role != "admin" and cached_session.get("customerId") != user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only view your own sessions"
+            )
+        return cached_session
     
     try:
         chat_session = await db_service.get_session(session_id)
@@ -2283,7 +2350,7 @@ async def get_session(
         # Get messages
         messages = chat_session.get("messages", [])
         
-        return {
+        result = {
             "id": chat_session["id"],
             "customerId": chat_session["customer_id"],
             "createdAt": chat_session["created_at"].isoformat() if chat_session.get("created_at") else None,
@@ -2308,6 +2375,11 @@ async def get_session(
                 for message in messages
             ],
         }
+        
+        # Cache the result for 5 minutes (300 seconds)
+        await cache_service.set(cache_key, result, ttl=300)
+        
+        return result
     except HTTPException:
         raise
     except Exception as e:

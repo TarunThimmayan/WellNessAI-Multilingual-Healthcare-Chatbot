@@ -267,129 +267,7 @@ A **comprehensive safety detection system** that scans user queries for red flag
 
 ---
 
-## 5. Multilingual Support with Indic Language Translation
-
-### What is the feature about?
-
-A **comprehensive multilingual system** that supports 6 Indian languages (English, Hindi, Tamil, Telugu, Kannada, Malayalam) with native script support, transliteration, and culturally appropriate responses. The system uses Google Translator API, Indic Transliteration library, and custom localization logic.
-
-### Why we need that feature?
-
-- **Accessibility**: Makes healthcare information accessible to non-English speakers
-- **Cultural Sensitivity**: Provides responses in native scripts and cultural context
-- **Wider Reach**: Serves diverse Indian population speaking different languages
-- **User Comfort**: Users can communicate in their preferred language
-
-### How we have implemented that feature in detail?
-
-**Language Support** (`api/main.py`):
-
-1. **Supported Languages**:
-   - English (en), Hindi (hi), Tamil (ta), Telugu (te), Kannada (kn), Malayalam (ml)
-
-2. **Translation Pipeline**:
-   ```python
-   def localize_text(text, target_lang, src_lang="en", response_style="native"):
-       # 1. Detect if text needs translation
-       # 2. Use Google Translator API for translation
-       # 3. Apply Indic transliteration if needed
-       # 4. Return localized text
-   ```
-
-3. **Indic Transliteration** (`api/services/indic_translator.py`):
-   - Converts Romanized text to native scripts (Devanagari, Tamil, Telugu, etc.)
-   - Handles mixed-language content
-   - Preserves medical terminology accuracy
-
-4. **Response Style**:
-   - `native`: Full translation to target language
-   - `romanized`: English with transliterated keywords
-   - `mixed`: Hybrid approach for technical terms
-
-5. **Language Detection**:
-   - Auto-detects user's language from query
-   - Falls back to English if detection fails
-   - Supports language switching mid-conversation
-
-6. **Frontend Integration**:
-   - Language selector in UI
-   - Real-time language switching
-   - Preserves language preference across sessions
-
-### Advantages of using this feature?
-
-- ✅ **Accessibility**: Serves 1.3+ billion people speaking different languages
-- ✅ **Cultural Sensitivity**: Native script support shows respect for local languages
-- ✅ **User Comfort**: Users can communicate in their preferred language
-- ✅ **Wider Adoption**: Removes language barriers to healthcare information
-- ✅ **Compliance**: Meets requirements for multilingual healthcare services
-- ✅ **Flexible**: Supports multiple response styles (native, romanized, mixed)
-
----
-
-## 6. Voice-First Interface with Speech-to-Text & Text-to-Speech
-
-### What is the feature about?
-
-A **complete voice interface** that allows users to interact with the chatbot using voice input (speech-to-text) and receive audio responses (text-to-speech). The system uses OpenAI Whisper for transcription and multiple TTS providers (ElevenLabs, Google TTS) for natural-sounding audio output.
-
-### Why we need that feature?
-
-- **Accessibility**: Enables users who cannot type (elderly, disabled, low literacy)
-- **Convenience**: Faster interaction, especially for mobile users
-- **Natural Interaction**: Voice is more natural than typing for health concerns
-- **Multilingual Voice**: Supports voice in multiple Indian languages
-
-### How we have implemented that feature in detail?
-
-**Voice Pipeline** (`api/main.py`):
-
-1. **Speech-to-Text (STT)**:
-   ```python
-   def transcribe_audio_bytes(audio_bytes, language_hint=None):
-       # Uses OpenAI Whisper API
-       # Supports multiple languages
-       # Returns transcribed text
-   ```
-
-2. **Text-to-Speech (TTS)**:
-   ```python
-   def synthesize_speech(text, target_lang):
-       # Primary: ElevenLabs (high quality, multilingual)
-       # Fallback: Google TTS (gTTS)
-       # Returns audio bytes and MIME type
-   ```
-
-3. **Voice Chat Endpoint** (`/voice-chat`):
-   - Accepts audio file upload
-   - Transcribes audio to text
-   - Processes through chat pipeline
-   - Converts response to audio
-   - Returns audio as base64-encoded string
-
-4. **Frontend Integration**:
-   - Browser MediaRecorder API for audio capture
-   - Real-time recording with visual feedback
-   - Audio playback for responses
-   - Supports multiple audio formats (webm, mp3)
-
-5. **Language Support**:
-   - STT supports language hints for better accuracy
-   - TTS supports all 6 languages with appropriate voices
-   - Automatic language detection from audio
-
-### Advantages of using this feature?
-
-- ✅ **Accessibility**: Enables voice interaction for all users
-- ✅ **Convenience**: Faster than typing, especially on mobile
-- ✅ **Natural**: More intuitive for health-related conversations
-- ✅ **Multilingual**: Supports voice in multiple languages
-- ✅ **High Quality**: Uses state-of-the-art STT/TTS models
-- ✅ **Resilient**: Multiple TTS providers ensure availability
-
----
-
-## 7. Personalized Health Profiles with Medical Conditions Tracking
+## 5. Personalized Health Profiles with Medical Conditions Tracking
 
 ### What is the feature about?
 
@@ -463,7 +341,7 @@ CREATE TABLE customers (
 
 ---
 
-## 8. Persistent Database Connection Pooling (NeonDB)
+## 6. Persistent Database Connection Pooling (NeonDB)
 
 ### What is the feature about?
 
@@ -526,7 +404,7 @@ A **persistent PostgreSQL connection pool** using asyncpg that maintains active 
 
 ---
 
-## 9. Upstash Redis Caching Layer
+## 7. Upstash Redis Caching Layer
 
 ### What is the feature about?
 
@@ -619,7 +497,7 @@ A **persistent PostgreSQL connection pool** using asyncpg that maintains active 
 
 ---
 
-## 10. Secure Authentication with JWT & HTTP-Only Cookies
+## 8. Secure Authentication with JWT & HTTP-Only Cookies
 
 ### What is the feature about?
 
@@ -695,7 +573,7 @@ A **secure authentication system** using JWT (JSON Web Tokens) stored in HTTP-on
 
 ---
 
-## 11. Chat History & Session Management
+## 9. Chat History & Session Management
 
 ### What is the feature about?
 
@@ -771,13 +649,12 @@ A **comprehensive chat history system** that stores all user conversations, mess
 
 ## Summary
 
-These 11 core features form the foundation of a production-ready, scalable, and secure healthcare chatbot application. Each feature adds significant value and weightage to the project, demonstrating:
+These 9 core features form the foundation of a production-ready, scalable, and secure healthcare chatbot application. Each feature adds significant value and weightage to the project, demonstrating:
 
 - **Technical Excellence**: Modern architecture with best practices
 - **Healthcare Focus**: Domain-specific features for medical use cases
 - **Scalability**: Designed to handle high traffic and concurrent users
 - **Security**: Enterprise-grade authentication and data protection
-- **Accessibility**: Multilingual and voice support for diverse users
 - **Reliability**: Fallback systems and health monitoring
 - **Performance**: Caching and connection pooling for optimal speed
 

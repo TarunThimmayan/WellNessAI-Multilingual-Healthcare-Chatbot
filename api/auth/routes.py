@@ -15,6 +15,9 @@ logger = logging.getLogger("health_assistant")
 
 # Check if we're in production for secure cookie settings
 IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() == "production"
+# For development, use "lax" samesite, for production use "lax" or "strict"
+# Note: "none" requires secure=True (HTTPS), so we use "lax" for both
+SAMESITE_POLICY = "lax" if IS_PRODUCTION else "lax"
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -57,8 +60,9 @@ async def register(
             value=tokens["access_token"],
             httponly=True,  # Client-side JavaScript cannot access
             secure=IS_PRODUCTION,  # Only send over HTTPS in production
-            samesite="lax",
+            samesite=SAMESITE_POLICY,
             max_age=30 * 60,  # 30 minutes
+            path="/",  # Ensure cookie is available for all paths
         )
         
         response.set_cookie(
@@ -66,8 +70,9 @@ async def register(
             value=tokens["refresh_token"],
             httponly=True,  # Client-side JavaScript cannot access
             secure=IS_PRODUCTION,  # Only send over HTTPS in production
-            samesite="lax",
+            samesite=SAMESITE_POLICY,
             max_age=7 * 24 * 60 * 60,  # 7 days
+            path="/",  # Ensure cookie is available for all paths
         )
         
         return UserResponse(**user)
@@ -114,8 +119,9 @@ async def login(
             value=tokens["access_token"],
             httponly=True,  # Client-side JavaScript cannot access
             secure=IS_PRODUCTION,  # Only send over HTTPS in production
-            samesite="lax",
+            samesite=SAMESITE_POLICY,
             max_age=30 * 60,  # 30 minutes
+            path="/",  # Ensure cookie is available for all paths
         )
         
         response.set_cookie(
@@ -123,8 +129,9 @@ async def login(
             value=tokens["refresh_token"],
             httponly=True,  # Client-side JavaScript cannot access
             secure=IS_PRODUCTION,  # Only send over HTTPS in production
-            samesite="lax",
+            samesite=SAMESITE_POLICY,
             max_age=7 * 24 * 60 * 60,  # 7 days
+            path="/",  # Ensure cookie is available for all paths
         )
         
         return UserResponse(**user)
@@ -174,21 +181,39 @@ async def logout(
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    user: dict = Depends(require_auth)
+    user: dict = Depends(require_auth),
+    request: Request = None
 ):
     """
     Get current user information
     
     Requires authentication
+    Cached in Redis for 5 minutes
     """
+    from ..services.cache import cache_service
+    
+    user_id = user["user_id"]
+    cache_key = f"user_info:{user_id}"
+    
+    # Try to get from Redis cache first
+    if cache_service.is_available():
+        cached_user = await cache_service.get(cache_key)
+        if cached_user is not None:
+            logger.debug(f"Cache hit for user info: {user_id}")
+            return UserResponse(**cached_user)
+    
     try:
-        user_data = await auth_service.get_user_by_id(user["user_id"])
+        user_data = await auth_service.get_user_by_id(user_id)
         
         if not user_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
+        
+        # Cache in Redis for 5 minutes (300 seconds)
+        if cache_service.is_available():
+            await cache_service.set(cache_key, user_data, ttl=300)
         
         return UserResponse(**user_data)
     
@@ -231,17 +256,15 @@ async def refresh_token(
                 detail="Invalid or expired refresh token"
             )
         
-        # Check if token is revoked
-        from ..database import prisma_client, get_prisma_client
-        if await prisma_client.ensure_connected():
-            client = await get_prisma_client()
-            token_record = await client.refreshtoken.find_unique(where={"token": refresh_token})
-            
-            if not token_record or token_record.revoked:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Refresh token has been revoked"
-                )
+        # Check if token is revoked using database service
+        from ..database import service as db_service
+        token_record = await db_service.get_refresh_token(refresh_token)
+        
+        if not token_record:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has been revoked or expired"
+            )
         
         # Get user data
         user_id = payload.get("sub")
@@ -262,8 +285,9 @@ async def refresh_token(
             value=tokens["access_token"],
             httponly=True,  # Client-side JavaScript cannot access
             secure=IS_PRODUCTION,  # Only send over HTTPS in production
-            samesite="lax",
+            samesite=SAMESITE_POLICY,
             max_age=30 * 60,  # 30 minutes
+            path="/",  # Ensure cookie is available for all paths
         )
         
         return {"message": "Token refreshed successfully"}

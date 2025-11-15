@@ -19,7 +19,8 @@ if not JWT_SECRET_KEY:
     logger.warning("JWT_SECRET_KEY not set, using generated key. Set JWT_SECRET_KEY in environment for production!")
 
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+# Access token expires after 4 hours of inactivity (longer for active sessions)
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "240"))  # 4 hours default
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
 # Security scheme for HTTP-only cookies
@@ -126,12 +127,25 @@ async def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     # Try to get token from HTTP-only cookie
     token = request.cookies.get("access_token")
     
+    # Log for debugging
+    if not token:
+        logger.debug(
+            f"No access_token cookie found for {request.method} {request.url.path}. "
+            f"Available cookies: {list(request.cookies.keys())}"
+        )
+    
     if not token:
         # Fallback to Authorization header (for API clients)
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
+            logger.debug(f"Using Authorization header token for {request.method} {request.url.path}")
         else:
+            logger.warning(
+                f"No authentication token found for {request.method} {request.url.path}. "
+                f"Cookies: {list(request.cookies.keys())}, "
+                f"Has Auth header: {bool(auth_header)}"
+            )
             return None
     
     # Verify token

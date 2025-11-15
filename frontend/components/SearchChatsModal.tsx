@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { X, Search as SearchIcon, Clock } from 'lucide-react';
 import { apiClient, API_BASE } from '../utils/api';
-import { getAuthUser } from '../utils/auth';
+import LoadingSkeleton from './LoadingSkeleton';
 
 interface ChatSession {
   id: string;
@@ -12,57 +12,38 @@ interface ChatSession {
   updatedAt: string;
   language?: string;
   messageCount: number;
+  firstMessage?: string;
 }
 
 interface SearchChatsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectSession: (sessionId: string) => void;
+  customerId?: string | null;
 }
 
-export default function SearchChatsModal({ isOpen, onClose, onSelectSession }: SearchChatsModalProps) {
+export default function SearchChatsModal({ isOpen, onClose, onSelectSession, customerId }: SearchChatsModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const user = getAuthUser();
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen && user) {
+    if (isOpen && customerId && !fetchingRef.current) {
       fetchSessions();
     }
-  }, [isOpen, user]);
+  }, [isOpen, customerId]);
 
   const fetchSessions = async () => {
-    if (!user) return;
+    if (!customerId || fetchingRef.current) return;
     
+    fetchingRef.current = true;
     setLoading(true);
     setError(null);
     try {
-      // Get customer_id from current user info
-      let customerId: string | null = null;
-      
-      try {
-        // Get current user info to get customer_id
-        const userInfoResponse = await apiClient.get(`${API_BASE}/auth/me`);
-        customerId = userInfoResponse.data?.id;
-      } catch (err: any) {
-        console.error('Error getting user info:', err);
-        // If /auth/me fails, we can't proceed
-        setError('Unable to get user information. Please try again.');
-        setSessions([]);
-        return;
-      }
-      
-      if (!customerId) {
-        setError('Unable to get user information');
-        setSessions([]);
-        return;
-      }
-      
       // Fetch sessions for this customer
-      const response = await apiClient.get(`${API_BASE}/customer/${customerId}/sessions?limit=100`);
+      const response = await apiClient.get(`${API_BASE}/customer/${customerId}/sessions?limit=1000`);
       setSessions(response.data || []);
     } catch (err: any) {
       console.error('Error fetching sessions:', err);
@@ -70,6 +51,7 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession }: S
       setSessions([]);
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
     }
   };
 
@@ -79,6 +61,7 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession }: S
     return (
       session.id.toLowerCase().includes(search) ||
       session.language?.toLowerCase().includes(search) ||
+      session.firstMessage?.toLowerCase().includes(search) ||
       new Date(session.createdAt).toLocaleString().toLowerCase().includes(search)
     );
   });
@@ -139,8 +122,8 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession }: S
         {/* Results */}
         <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-sm text-slate-400">Loading chat history...</div>
+            <div className="space-y-2">
+              <LoadingSkeleton variant="chatHistory" count={5} />
             </div>
           ) : error ? (
             <div className="flex items-center justify-center py-12">
@@ -179,11 +162,17 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession }: S
                         )}
                       </div>
                       <p className="text-sm font-medium text-slate-200 truncate">
-                        {session.messageCount} message{session.messageCount !== 1 ? 's' : ''}
+                        {session.firstMessage
+                          ? (session.firstMessage.length > 80
+                              ? session.firstMessage.substring(0, 80) + '...'
+                              : session.firstMessage)
+                          : `${session.messageCount} message${session.messageCount !== 1 ? 's' : ''}`}
                       </p>
-                      <p className="text-xs text-slate-500 mt-1 truncate font-mono">
-                        {session.id}
-                      </p>
+                      {session.firstMessage && (
+                        <p className="text-xs text-slate-500 mt-1 truncate">
+                          {session.messageCount} message{session.messageCount !== 1 ? 's' : ''}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </button>

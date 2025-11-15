@@ -8,13 +8,18 @@ import logging
 
 logger = logging.getLogger("health_assistant")
 
-# SQL injection patterns
+# SQL injection patterns - more specific to avoid false positives
 SQL_INJECTION_PATTERNS = [
-    r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|TRUNCATE)\b)",
-    r"(--|;|/\*|\*/)",
+    # SQL keywords in suspicious contexts
+    r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|TRUNCATE)\s+.*FROM|INTO|WHERE)",
+    # SQL comment patterns (but not em dashes in text)
+    r"(--\s|/\*|\*/)",
+    # SQL injection attempts with OR/AND
     r"(\b(OR|AND)\s+\d+\s*=\s*\d+)",
     r"(\b(OR|AND)\s+['\"]\w+['\"]\s*=\s*['\"]\w+['\"])",
-    r"('|\"|;|--|\*|/|\\)",
+    # Suspicious patterns: semicolons followed by SQL keywords, or multiple quotes in suspicious context
+    r"(;\s*(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION))",
+    r"('.*'|\".*\")\s*(OR|AND|UNION)",
 ]
 
 # XSS patterns
@@ -244,8 +249,23 @@ def validate_chat_input(text: str) -> str:
     if len(text) > 5000:  # Reasonable limit for chat messages
         raise ValueError("Chat text is too long (maximum 5000 characters)")
     
-    # Check for SQL injection
-    for pattern in SQL_INJECTION_PATTERNS:
+    # Check for SQL injection - use more lenient patterns for chat messages
+    # Only flag actual SQL injection attempts, not normal punctuation like apostrophes
+    chat_sql_patterns = [
+        # SQL keywords followed by FROM/INTO/WHERE (actual SQL statements)
+        r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|TRUNCATE)\s+.*\b(FROM|INTO|WHERE|SET|VALUES)\b)",
+        # SQL comment patterns (-- followed by space, or /* */)
+        r"(--\s|/\*|\*/)",
+        # SQL injection attempts with OR/AND
+        r"(\b(OR|AND)\s+\d+\s*=\s*\d+)",
+        r"(\b(OR|AND)\s+['\"]\w+['\"]\s*=\s*['\"]\w+['\"])",
+        # Semicolons followed by SQL keywords (command chaining)
+        r"(;\s*(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION))",
+        # Quoted strings followed by SQL operators (suspicious)
+        r"(['\"].*['\"])\s*(OR|AND|UNION)\s+",
+    ]
+    
+    for pattern in chat_sql_patterns:
         if re.search(pattern, text, re.IGNORECASE):
             logger.warning(f"Potential SQL injection in chat input: {text[:50]}")
             raise ValueError("Invalid input: potentially dangerous content detected")
