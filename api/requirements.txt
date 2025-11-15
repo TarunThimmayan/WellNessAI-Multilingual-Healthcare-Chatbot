@@ -22,3 +22,5 @@ PyJWT==2.10.1
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.9
 email-validator>=2.1.0
+redis==5.0.1
+hiredis==2.3.2

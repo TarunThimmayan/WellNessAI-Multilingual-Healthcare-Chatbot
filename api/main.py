@@ -85,6 +85,12 @@ from .services.indic_translator import IndicTransService
 from .database import prisma_client, db_service
 from .auth.routes import router as auth_router
 from .auth.middleware import require_auth, require_role
+from .pipeline_functions import (
+    detect_and_translate_to_english,
+    generate_final_answer,
+    translate_to_user_language,
+)
+from .services.cache import cache_service
 
 indic_translator = IndicTransService()
 
@@ -103,7 +109,7 @@ app.include_router(auth_router)
 
 @app.on_event("startup")
 async def _startup() -> None:
-    """Initialize persistent database connection pool on startup"""
+    """Initialize persistent database connection pool and cache on startup"""
     try:
         # Initialize PostgreSQL connection pool (persistent, stays alive)
         connected = await prisma_client.connect()
@@ -114,6 +120,12 @@ async def _startup() -> None:
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}", exc_info=True)
         logger.warning("Database not connected - chat history will not be saved")
+    
+    # Initialize cache service (Redis)
+    if cache_service.is_available():
+        logger.info("Redis cache (L2) initialized successfully")
+    else:
+        logger.warning("Redis cache (L2) not available - caching will use L1 and L3 only")
 
 
 @app.on_event("shutdown")
@@ -776,7 +788,7 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 openrouter_api_key = OPENROUTER_API_KEY
 _openai_client: Optional[OpenAI] = None
 _openrouter_client: Optional[OpenAI] = None
-_chat_model_openai: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-3.5-turbo")
+_chat_model_openai: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 _chat_model_openrouter: str = OPENROUTER_MODEL
 _neo4j_available: Optional[bool] = None
 
@@ -1142,52 +1154,65 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
     total_start = time.perf_counter()
 
     text = request.text
-    requested_lang_raw = request.lang if request.lang in SUPPORTED_LANG_CODES else None
-    romanized_lang = detect_romanized_language(text)
-    detected_lang = detect_language(text) if text else DEFAULT_LANG
-    detected_supported = detected_lang if detected_lang in SUPPORTED_LANG_CODES else None
-
-    requested_lang = requested_lang_raw
-    response_style = "native"
-    native_script_variant: Optional[str] = None
-    debug_info: Dict[str, Any] = {
-        "input_text": text,
-        "requested_language": requested_lang_raw,
-        "detected_language": detected_lang,
-        "romanized_detected_language": romanized_lang,
-    }
-
-    if romanized_lang:
-        if not requested_lang or requested_lang in {DEFAULT_LANG, romanized_lang}:
-            requested_lang = romanized_lang
-            response_style = "romanized"
-        if not detected_supported or detected_supported in {DEFAULT_LANG, "en"}:
-            detected_supported = romanized_lang
-
-    target_lang = requested_lang or detected_supported or DEFAULT_LANG
-    language_label = get_language_label(target_lang, response_style=response_style)
-    debug_info["target_language"] = target_lang
-    debug_info["response_style"] = response_style
-
     profile: Profile = request.profile
     personalization_notes = build_personalization_notes(profile)
-
-    processed_text = text
-    source_lang_for_processing = detected_supported or DEFAULT_LANG
-    romanization_meta: Dict[str, Any] = {}
-    if romanized_lang and response_style == "romanized":
-        processed_text, native_script_variant, romanization_meta = translate_romanized_to_english(
-            text, romanized_lang
+    
+    # ============================================================
+    # STEP 1: Language Detection (Separate from Translation)
+    # ============================================================
+    detection_start = time.perf_counter()
+    openai_client = get_openai_client()
+    model = _chat_model_openai
+    
+    # Detect language first (separate stage)
+    if openai_client and model:
+        from .pipeline_functions import detect_language_only, translate_to_english
+        detected_lang = detect_language_only(
+            client=openai_client,
+            model=model,
+            user_text=text
         )
-        source_lang_for_processing = romanized_lang
-    elif source_lang_for_processing != "en":
-        processed_text = translate_text(text, target_lang="en", src_lang=source_lang_for_processing)
-    debug_info["processed_text_en"] = processed_text
-    debug_info["processed_text_source_language"] = source_lang_for_processing
-    if native_script_variant:
-        debug_info["native_script_variant"] = native_script_variant
-    if romanization_meta:
-        debug_info["romanized_translation"] = romanization_meta
+    else:
+        # Fallback to old method if OpenAI client not available
+        logger.warning("OpenAI client not available, using fallback language detection")
+        detected_lang = detect_language(text) if text else DEFAULT_LANG
+        detected_lang = detected_lang if detected_lang in SUPPORTED_LANG_CODES else DEFAULT_LANG
+    
+    # Use requested language if provided, otherwise use detected
+    requested_lang_raw = request.lang if request.lang in SUPPORTED_LANG_CODES else None
+    target_lang = requested_lang_raw or detected_lang or DEFAULT_LANG
+    
+    # ============================================================
+    # STEP 1.5: Translation to English (SKIP if English detected)
+    # ============================================================
+    if detected_lang == "en":
+        # Skip translation entirely if English detected - optimize pipeline
+        processed_text = text
+        logger.debug("English detected - skipping translation step")
+    else:
+        # Translate to English only if not English
+        if openai_client and model:
+            processed_text = translate_to_english(
+                client=openai_client,
+                model=model,
+                user_text=text,
+                source_language=detected_lang
+            )
+        else:
+            # Fallback to old method
+            processed_text = translate_text(text, target_lang="en", src_lang=detected_lang)
+    
+    timings["language_detection"] = time.perf_counter() - detection_start
+    timings["translation_to_english"] = 0.0 if detected_lang == "en" else (time.perf_counter() - detection_start - timings.get("language_detection", 0))
+    
+    debug_info: Dict[str, Any] = {
+        "input_text": text,
+        "detected_language": detected_lang,
+        "target_language": target_lang,
+        "processed_text_en": processed_text,
+        "translation_skipped": (detected_lang == "en"),
+        "pipeline": "optimized_multilingual_pipeline",
+    }
 
     safety_start = time.perf_counter()
     safety_result = detect_red_flags(processed_text, "en")
@@ -1195,26 +1220,32 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
     pregnancy_alert_en = detect_pregnancy_emergency(processed_text)
     timings["safety_analysis"] = time.perf_counter() - safety_start
 
+    # Translate mental health and pregnancy alerts if needed (skip if English detected)
     mental_health_display = mental_health_en
-    if target_lang != "en" and mental_health_en["first_aid"]:
+    if detected_lang != "en" and target_lang != "en" and mental_health_en["first_aid"] and openai_client and model:
+        # Translate first aid steps
+        translated_first_aid = []
+        for step in mental_health_en["first_aid"]:
+            translated = translate_to_user_language(
+                client=openai_client,
+                model=model,
+                english_text=step,
+                target_language=target_lang,
+            )
+            translated_first_aid.append(translated)
         mental_health_display = {
             **mental_health_en,
-            "first_aid": localize_list(
-                mental_health_en["first_aid"],
-                target_lang,
-                response_style=response_style,
-            ),
+            "first_aid": translated_first_aid,
         }
 
-    pregnancy_guidance_display = (
-        PREGNANCY_ALERT_GUIDANCE_EN
-        if target_lang == "en"
-        else localize_list(
-            PREGNANCY_ALERT_GUIDANCE_EN,
-            target_lang,
-            response_style=response_style,
-        )
-    )
+    pregnancy_guidance_display = PREGNANCY_ALERT_GUIDANCE_EN
+    if detected_lang != "en" and target_lang != "en" and openai_client and model:
+        pregnancy_guidance_display = translate_to_user_language(
+            client=openai_client,
+            model=model,
+            english_text="\n".join(PREGNANCY_ALERT_GUIDANCE_EN),
+            target_language=target_lang,
+        ).split("\n")
     pregnancy_alert_display = {
         **pregnancy_alert_en,
         "guidance": pregnancy_guidance_display,
@@ -1380,40 +1411,57 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
             if not any(f.get("type") == "personalization" for f in facts_en):
                 facts_en.append({"type": "personalization", "data": personalization_notes})
 
+        # ============================================================
+        # STEP 4: Generate Final Answer in English
+        # ============================================================
         generation_start = time.perf_counter()
-        answer_en, provider_meta = generate_answer(
-            context=context,
-            query_en=processed_text,
-            llm_language_label="English",
-            original_query=text,
-            facts=facts_en,
-            citations=citations,
-        )
-        if provider_meta.get("fallback"):
-            localized_answer = build_fallback_answer(
+        
+        if openai_client and model:
+            answer_en = generate_final_answer(
+                client=openai_client,
+                model=model,
+                user_question=processed_text,
+                rag_context=context,
+                facts=facts_en,
+                profile=profile,
+            )
+            provider_meta = {"provider": "openai", "model": model, "fallback": False}
+        else:
+            # Fallback to old method
+            answer_en, provider_meta = generate_answer(
+                context=context,
                 query_en=processed_text,
-                rag_results=rag_results,
+                llm_language_label="English",
+                original_query=text,
                 facts=facts_en,
                 citations=citations,
-                target_lang=target_lang,
-                response_style=response_style,
             )
-            answer_en = FALLBACK_MESSAGE_EN
+        
+        # ============================================================
+        # STEP 5: Translate Answer Back to User's Language
+        # ============================================================
+        translation_start = time.perf_counter()
+        
+        # Skip translation back if English was detected (optimization)
+        if detected_lang == "en":
+            answer = answer_en
+        elif target_lang != "en" and openai_client and model:
+            # Translate to user's language (always native script)
+            answer = translate_to_user_language(
+                client=openai_client,
+                model=model,
+                english_text=answer_en,
+                target_language=target_lang,
+            )
         else:
-            localization_meta: Dict[str, Any] = {}
-            localized_answer = localize_text(
-                answer_en,
-                target_lang=target_lang,
-                response_style=response_style,
-                capture_meta=localization_meta,
-            )
-            if localization_meta:
-                debug_info["localization"] = localization_meta
+            answer = answer_en
+        
         timings["answer_generation"] = time.perf_counter() - generation_start
+        timings["answer_translation"] = time.perf_counter() - translation_start
+        
         debug_info["llm"] = provider_meta
         debug_info["answer_en"] = answer_en
-        debug_info["answer_localized"] = localized_answer
-        answer = localized_answer
+        debug_info["answer_localized"] = answer
         
     else:
         rag_start = time.perf_counter()
@@ -1471,45 +1519,77 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
                 )
                 facts_en.append({"type": "personalization", "data": personalization_notes})
 
+            # ============================================================
+            # STEP 4: Generate Final Answer in English
+            # ============================================================
             generation_start = time.perf_counter()
-            answer_en, provider_meta = generate_answer(
-                context=context,
-                query_en=processed_text,
-                llm_language_label="English",
-                original_query=text,
-                facts=facts_en,
-                citations=citations,
-            )
-            if provider_meta.get("fallback"):
-                localized_answer = build_fallback_answer(
+            
+            if openai_client and model:
+                answer_en = generate_final_answer(
+                    client=openai_client,
+                    model=model,
+                    user_question=processed_text,
+                    rag_context=context,
+                    facts=facts_en,
+                    profile=profile,
+                )
+                provider_meta = {"provider": "openai", "model": model, "fallback": False}
+            else:
+                # Fallback to old method
+                answer_en, provider_meta = generate_answer(
+                    context=context,
                     query_en=processed_text,
-                    rag_results=rag_results,
+                    llm_language_label="English",
+                    original_query=text,
                     facts=facts_en,
                     citations=citations,
-                    target_lang=target_lang,
-                    response_style=response_style,
                 )
-                answer_en = FALLBACK_MESSAGE_EN
+            
+            # ============================================================
+            # STEP 5: Translate Answer Back to User's Language
+            # ============================================================
+            translation_start = time.perf_counter()
+            
+            # Skip translation back if English was detected (optimization)
+            if detected_lang == "en":
+                answer = answer_en
+            elif target_lang != "en" and openai_client and model:
+                # Translate to user's language (always native script)
+                answer = translate_to_user_language(
+                    client=openai_client,
+                    model=model,
+                    english_text=answer_en,
+                    target_language=target_lang,
+                )
             else:
-                localization_meta: Dict[str, Any] = {}
-                localized_answer = localize_text(
-                    answer_en,
-                    target_lang=target_lang,
-                    response_style=response_style,
-                    capture_meta=localization_meta,
-                )
-                if localization_meta:
-                    debug_info["localization"] = localization_meta
+                answer = answer_en
+            
             timings["answer_generation"] = time.perf_counter() - generation_start
+            timings["answer_translation"] = time.perf_counter() - translation_start
+            
             debug_info["llm"] = provider_meta
             debug_info["answer_en"] = answer_en
-            debug_info["answer_localized"] = localized_answer
-            answer = localized_answer
+            debug_info["answer_localized"] = answer
 
     if not safety_result["red_flag"]:
-        answer += "\n\n" + get_localized_disclaimer(target_lang, response_style=response_style)
+        # Translate disclaimer to user's language (skip if English detected)
+        disclaimer_en = DISCLAIMER_EN
+        if detected_lang == "en":
+            disclaimer = disclaimer_en
+        elif target_lang != "en" and openai_client and model:
+            disclaimer = translate_to_user_language(
+                client=openai_client,
+                model=model,
+                english_text=disclaimer_en,
+                target_language=target_lang,
+            )
+        else:
+            disclaimer = disclaimer_en
+        answer += "\n\n" + disclaimer
 
-    facts_response = localize_fact_guidance(facts_en, target_lang, response_style=response_style)
+    # Translate facts if needed (simplified - keeping facts in English for now)
+    # Can be enhanced later to translate facts
+    facts_response = facts_en
 
     safety_payload = {
         **safety_result,
@@ -1535,7 +1615,7 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
             "route": route,
             "facts": len(response.facts),
             "target_lang": target_lang,
-            "response_style": response_style,
+            "pipeline": "new_multilingual",
         },
     )
     timings["total"] = time.perf_counter() - total_start
@@ -1543,7 +1623,8 @@ def process_chat_request(request: ChatRequest) -> Tuple[ChatResponse, str, Dict[
     metadata_payload: Dict[str, Any] = {
         "timings": timings,
         "target_language": target_lang,
-        "response_style": response_style,
+        "detected_language": detected_lang,
+        "pipeline": "new_multilingual",
     }
     if request.debug:
         metadata_payload["debug"] = debug_info
@@ -1619,10 +1700,93 @@ async def chat(
             except Exception as e:
                 logger.warning(f"Failed to save customer/session data: {e}", exc_info=True)
         
+        # ============================================================
+        # 3-LEVEL CACHING: Check cache before processing
+        # ============================================================
+        cache_key = cache_service.generate_cache_key(
+            text=request.text,
+            lang=request.lang,
+            profile=request.profile.model_dump(exclude_none=True)
+        )
+        
+        cached_response = None
+        cache_level = None
+        
+        # L2: Check Redis cache
+        if cache_service.is_available():
+            cached_response = await cache_service.get_from_cache(cache_key)
+            if cached_response:
+                cache_level = "L2-Redis"
+                logger.info(f"Cache HIT ({cache_level}): {cache_key[:30]}...")
+        
+        # L3: Check Database cache if L2 missed
+        if not cached_response and prisma_client.is_connected():
+            cached_response = await db_service.get_cached_chat_response(
+                text=request.text,
+                profile=request.profile.model_dump(exclude_none=True),
+                lang=request.lang
+            )
+            if cached_response:
+                cache_level = "L3-Database"
+                logger.info(f"Cache HIT ({cache_level}): Found in database")
+                # Store in L2 (Redis) for faster future access
+                if cache_service.is_available():
+                    await cache_service.set_to_cache(cache_key, cached_response)
+        
+        # If cache hit, return cached response
+        if cached_response:
+            from .models import ChatResponse, Safety, Fact
+            from fastapi.responses import Response
+            
+            # Reconstruct response object from cache
+            response = ChatResponse(
+                answer=cached_response["answer"],
+                route=cached_response.get("route", "vector"),
+                safety=Safety(**cached_response.get("safety", {})),
+                facts=[Fact(**f) for f in cached_response.get("facts", [])],
+                citations=cached_response.get("citations", []),
+                metadata={
+                    **cached_response.get("metadata", {}),
+                    "cache_level": cache_level,
+                    "cached": True,
+                }
+            )
+            
+            # Add customer_id and session_id to response metadata
+            if customer_id:
+                response.metadata["customer_id"] = customer_id
+            if session_id:
+                response.metadata["session_id"] = session_id
+            
+            # Add L1 cache headers (browser storage) with content hash for proper ETag
+            response_data = response.model_dump()
+            content_hash = cache_service._generate_content_hash(response_data)
+            cache_headers = cache_service.get_cache_headers(cache_hit=True, content_hash=content_hash)
+            
+            # Create response with cache headers
+            from fastapi.responses import JSONResponse
+            json_response = JSONResponse(content=response_data)
+            for header, value in cache_headers.items():
+                json_response.headers[header] = value
+            
+            logger.info(
+                "Returning cached response",
+                extra={
+                    "cache_level": cache_level,
+                    "customer_id": customer_id,
+                    "session_id": session_id,
+                }
+            )
+            return json_response
+        
+        # Cache miss - process request normally
+        logger.debug(f"Cache MISS: Processing new request")
+        cache_service._record_stat("misses", "MISS")
+        
         # Process chat request
         response, target_lang, timings = process_chat_request(request)
         
-        # Save assistant response to database
+        # Save assistant response to database (L3 cache)
         if prisma_client.is_connected() and session_id:
             try:
                 # Convert safety to dict
@@ -1643,6 +1807,21 @@ async def chat(
             except Exception as e:
                 logger.warning(f"Failed to save chat message: {e}", exc_info=True)
         
+        # Store in L2 cache (Redis) for faster future access
+        if cache_service.is_available():
+            try:
+                cache_data = {
+                    "answer": response.answer,
+                    "route": response.route,
+                    "safety": response.safety.model_dump() if hasattr(response.safety, 'model_dump') else dict(response.safety),
+                    "facts": [f.model_dump() if hasattr(f, 'model_dump') else dict(f) for f in response.facts],
+                    "citations": response.citations,
+                    "metadata": response.metadata,
+                }
+                await cache_service.set_to_cache(cache_key, cache_data)
+            except Exception as e:
+                logger.warning(f"Failed to store in Redis cache: {e}")
+        
         # Add customer_id and session_id to response metadata
         if customer_id:
             response.metadata["customer_id"] = customer_id
@@ -1659,9 +1838,20 @@ async def chat(
                 "timings": timings,
                 "customer_id": customer_id,
                 "session_id": session_id,
+                "cache_level": "MISS",
             },
         )
-        return response
+        
+        # Add L1 cache headers (browser storage) for cache miss with content hash
+        from fastapi.responses import JSONResponse
+        response_data = response.model_dump()
+        content_hash = cache_service._generate_content_hash(response_data)
+        cache_headers = cache_service.get_cache_headers(cache_hit=False, content_hash=content_hash)
+        json_response = JSONResponse(content=response_data)
+        for header, value in cache_headers.items():
+            json_response.headers[header] = value
+        
+        return json_response
     except HTTPException:
         raise
     except Exception as e:
@@ -1670,6 +1860,58 @@ async def chat(
             status_code=500,
             detail="Unable to process your request right now. Please try again in a moment.",
         ) from e
+
+
+@app.get("/cache/stats")
+async def get_cache_stats(
+    user: dict = Depends(require_auth)
+):
+    """
+    Get cache statistics (hits, misses, hit rate, etc.)
+    Requires authentication
+    """
+    stats = cache_service.get_statistics()
+    info = cache_service.get_cache_info()
+    return {
+        "statistics": stats,
+        "info": info,
+    }
+
+
+@app.get("/cache/info")
+async def get_cache_info_endpoint(
+    user: dict = Depends(require_auth)
+):
+    """
+    Get cache system information
+    Requires authentication
+    """
+    return cache_service.get_cache_info()
+
+
+@app.post("/cache/invalidate")
+async def invalidate_cache_endpoint(
+    pattern: Optional[str] = None,
+    user: dict = Depends(require_auth)
+):
+    """
+    Invalidate cache entries by pattern
+    Requires authentication and admin role
+    """
+    # Only admins can invalidate cache
+    user_role = user.get("role", "user")
+    if user_role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can invalidate cache")
+    
+    if pattern:
+        deleted = await cache_service.invalidate_cache(pattern=pattern)
+    else:
+        deleted = await cache_service.invalidate_all_cache()
+    
+    return {
+        "deleted_keys": deleted,
+        "pattern": pattern or "chat:response:*",
+    }
 
 
 @app.post("/voice-chat", response_model=VoiceChatResponse)

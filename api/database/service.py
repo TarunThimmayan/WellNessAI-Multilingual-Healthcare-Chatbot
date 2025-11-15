@@ -145,6 +145,98 @@ class DatabaseService:
             return None
     
     @staticmethod
+    async def get_cached_chat_response(
+        text: str,
+        profile: Dict[str, Any],
+        lang: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get cached chat response from database (L3 cache)
+        Searches for recent assistant responses matching the query and profile
+        
+        Args:
+            text: User's query text
+            profile: User profile dict
+            lang: Language code
+            
+        Returns:
+            Cached response dict or None
+        """
+        if not await db_client.ensure_connected():
+            return None
+        
+        try:
+            # Normalize text for matching
+            normalized_text = text.lower().strip()
+            
+            # Build query with proper parameter binding
+            param_num = 1
+            params = [normalized_text]
+            conditions = [f"LOWER(TRIM(cm.message_text)) = ${param_num}"]
+            param_num += 1
+            
+            # Add language filter
+            if lang:
+                conditions.append(f"cm.language = ${param_num}")
+                params.append(lang)
+                param_num += 1
+            
+            # Add profile filters
+            if profile.get("age"):
+                conditions.append(f"cm.metadata->>'age' = ${param_num}")
+                params.append(str(profile["age"]))
+                param_num += 1
+            if profile.get("sex"):
+                conditions.append(f"cm.metadata->>'sex' = ${param_num}")
+                params.append(profile["sex"])
+                param_num += 1
+            if profile.get("diabetes"):
+                conditions.append("(cm.metadata->>'diabetes')::boolean = true")
+            if profile.get("hypertension"):
+                conditions.append("(cm.metadata->>'hypertension')::boolean = true")
+            if profile.get("pregnancy"):
+                conditions.append("(cm.metadata->>'pregnancy')::boolean = true")
+            
+            # Query for recent matching assistant responses (within last 24 hours)
+            query = f"""
+                SELECT 
+                    cm.answer,
+                    cm.route,
+                    cm.safety_data,
+                    cm.facts,
+                    cm.citations,
+                    cm.metadata,
+                    cm.language,
+                    cm.created_at
+                FROM chat_messages cm
+                WHERE cm.role = 'assistant'
+                    AND {' AND '.join(conditions)}
+                    AND cm.created_at > NOW() - INTERVAL '24 hours'
+                ORDER BY cm.created_at DESC
+                LIMIT 1
+            """
+            
+            result = await db_client.fetchrow(query, *params)
+            
+            if result:
+                logger.debug(f"Cache HIT (L3 Database): Found matching response")
+                return {
+                    "answer": result["answer"],
+                    "route": result["route"],
+                    "safety": result["safety_data"] or {},
+                    "facts": result["facts"] or [],
+                    "citations": result["citations"] or [],
+                    "metadata": result["metadata"] or {},
+                    "language": result["language"],
+                    "cached_at": result["created_at"].isoformat() if result["created_at"] else None,
+                }
+            
+            return None
+        except Exception as e:
+            logger.warning(f"Error querying cached response from database: {e}")
+            return None
+    
+    @staticmethod
     async def save_chat_message(
         session_id: str,
         role: str,
