@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { Check, Loader2, ShieldCheck, Sparkles, XCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { setAuth, type AuthUser } from '../../utils/auth';
-import { apiClient, API_BASE } from '../../utils/api';
+import { apiClient } from '../../utils/api';
 
 type ToastVariant = 'success' | 'error' | 'info';
 
@@ -153,7 +153,7 @@ export default function AuthExperience() {
     
     try {
       // Call backend registration API
-      const response = await apiClient.post(`${API_BASE}/auth/register`, {
+      const response = await apiClient.post('/auth/register', {
         email: signUpForm.email,
         password: signUpForm.password,
         age: undefined,
@@ -204,7 +204,7 @@ export default function AuthExperience() {
     
     try {
       // Call backend login API
-      const response = await apiClient.post(`${API_BASE}/auth/login`, {
+      const response = await apiClient.post('/auth/login', {
         email: loginForm.email,
         password: loginForm.password,
       });

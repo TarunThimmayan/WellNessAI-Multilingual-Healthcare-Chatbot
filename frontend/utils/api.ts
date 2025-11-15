@@ -4,8 +4,9 @@
  */
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
+// Support both NEXT_PUBLIC_BACKEND_URL and NEXT_PUBLIC_API_BASE for flexibility
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, '') ?? 'http://localhost:8000';
+  (process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE)?.replace(/\/$/, '') ?? 'http://localhost:8000';
 
 // Create axios instance with credentials enabled
 export const apiClient = axios.create({
@@ -62,11 +63,10 @@ apiClient.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        // Try to refresh the token
-        const response = await axios.post(
-          `${API_BASE}/auth/refresh`,
-          {},
-          { withCredentials: true }
+        // Try to refresh the token using apiClient to ensure baseURL is used
+        const response = await apiClient.post(
+          '/auth/refresh',
+          {}
         );
 
         if (response.status === 200) {

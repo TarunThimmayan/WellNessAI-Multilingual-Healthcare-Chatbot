@@ -3,7 +3,7 @@
 import clsx from 'clsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiClient, API_BASE } from '../utils/api';
+import { apiClient } from '../utils/api';
 import { isAuthenticated, clearAuth, getAuthUser } from '../utils/auth';
 import {
   AlertTriangle,
@@ -36,8 +36,6 @@ import { CalendarDays, Heart, MapPin, Stethoscope } from 'lucide-react';
 
 type LangCode = 'en' | 'hi' | 'ta' | 'te' | 'kn' | 'ml';
 type SexOption = 'male' | 'female' | 'other';
-
-// API_BASE is now imported from utils/api
 
 const LANGUAGE_OPTIONS: Array<{
   value: LangCode;
@@ -238,7 +236,7 @@ export default function Home() {
       }
 
       // Fetch from API
-      const response = await apiClient.get(`${API_BASE}/customer/${customerId}/sessions?limit=1000`);
+      const response = await apiClient.get(`/customer/${customerId}/sessions?limit=1000`);
       const sessions = response.data || [];
       setChatSessions(sessions);
       saveChatSessionsToCache(customerId, sessions);
@@ -275,7 +273,7 @@ export default function Home() {
           }
           
           // Fetch from API
-          const response = await apiClient.get(`${API_BASE}/auth/me`);
+          const response = await apiClient.get('/auth/me');
           if (response.data?.id) {
             setCustomerId(response.data.id);
             // Save to browser cache
@@ -435,7 +433,7 @@ export default function Home() {
     setError(null);
 
     try {
-      const response = await apiClient.post(`${API_BASE}/chat`, {
+      const response = await apiClient.post('/chat', {
         text: messageText,
         lang,
         profile,
@@ -594,7 +592,7 @@ export default function Home() {
       const formData = new FormData();
       formData.append('file', audioBlob, 'voice-note.webm');
 
-      const response = await apiClient.post(`${API_BASE}/stt`, formData, {
+      const response = await apiClient.post('/stt', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
@@ -696,7 +694,7 @@ export default function Home() {
     if (!sessionId) return;
 
     try {
-      await apiClient.delete(`${API_BASE}/session/${sessionId}`);
+      await apiClient.delete(`/session/${sessionId}`);
       
       // Remove from local state
       setChatSessions((prev) => prev.filter((s) => s.id !== sessionId));
@@ -758,7 +756,7 @@ export default function Home() {
       }
 
       // Fetch the session with messages from API
-      const response = await apiClient.get(`${API_BASE}/session/${sessionId}/messages?limit=1000`);
+      const response = await apiClient.get(`/session/${sessionId}/messages?limit=1000`);
       const messages = response.data || [];
       
       if (messages && Array.isArray(messages)) {

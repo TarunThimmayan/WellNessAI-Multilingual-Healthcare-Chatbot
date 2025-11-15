@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { X, Search as SearchIcon, Clock } from 'lucide-react';
-import { apiClient, API_BASE } from '../utils/api';
+import { apiClient } from '../utils/api';
 import LoadingSkeleton from './LoadingSkeleton';
 
 interface ChatSession {
@@ -43,7 +43,7 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession, cus
     setError(null);
     try {
       // Fetch sessions for this customer
-      const response = await apiClient.get(`${API_BASE}/customer/${customerId}/sessions?limit=1000`);
+      const response = await apiClient.get(`/customer/${customerId}/sessions?limit=1000`);
       setSessions(response.data || []);
     } catch (err: any) {
       console.error('Error fetching sessions:', err);
