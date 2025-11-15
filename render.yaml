@@ -2,12 +2,12 @@ services:
   - type: web
     name: healthcare-chatbot-api
     env: python
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install --prefer-binary -r api/requirements.txt
+    buildCommand: python3.11 -m pip install --upgrade pip setuptools wheel && python3.11 -m pip install --only-binary :all: pydantic pydantic-core && python3.11 -m pip install --prefer-binary -r api/requirements.txt
     startCommand: cd api && uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2
     plan: starter
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.10
       - key: ENVIRONMENT
         value: production
       - key: PIP_NO_BUILD_ISOLATION
