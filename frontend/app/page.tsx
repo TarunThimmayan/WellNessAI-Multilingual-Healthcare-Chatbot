@@ -11,6 +11,8 @@ import {
   HeartPulse,
   Menu,
   Mic,
+  Volume2,
+  VolumeX,
   Phone,
   SendHorizonal,
   Settings,
@@ -177,6 +179,50 @@ export default function Home() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
+  const [narrationEnabled, setNarrationEnabled] = useState<boolean>(true);
+
+  // Persist narration preference per user (email) with a sensible default of enabled
+  const narrationPrefKey = useMemo(() => {
+    const user = getAuthUser();
+    const userKey = user?.email ?? 'guest';
+    return `narration_enabled:${userKey}`;
+  }, [isAuthChecked]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = localStorage.getItem(narrationPrefKey);
+      if (saved === null) {
+        // default to enabled
+        localStorage.setItem(narrationPrefKey, 'true');
+        setNarrationEnabled(true);
+      } else {
+        setNarrationEnabled(saved === 'true');
+      }
+    } catch {
+      // fallback
+      setNarrationEnabled(true);
+    }
+  }, [narrationPrefKey]);
+
+  const toggleNarration = useCallback(() => {
+    setNarrationEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(narrationPrefKey, String(next));
+      } catch {}
+      if (!next && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      return next;
+    });
+  }, [narrationPrefKey]);
+
+  const stopNarration = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, []);
 
   // All refs must be declared before any conditional returns
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -470,7 +516,7 @@ export default function Home() {
         loadChatSessions(customerId);
       }
 
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window && narrationEnabled) {
         const utterance = new SpeechSynthesisUtterance(response.data.answer);
         utterance.lang = LANGUAGE_SPEECH_MAP[lang] ?? 'en-US';
         utterance.rate = 0.92;
@@ -1059,6 +1105,34 @@ export default function Home() {
                   >
                     <Share2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
                     <span className="hidden sm:inline">Share</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleNarration}
+                    className={clsx(
+                      "inline-flex items-center gap-1.5 rounded-full border px-2 py-1.5 text-[0.65rem] font-semibold shadow-[0_0_25px_rgba(16,185,129,0.18)] transition sm:gap-2 sm:px-3 sm:py-2 sm:text-xs",
+                      narrationEnabled
+                        ? "border-emerald-400/60 bg-slate-900/70 text-emerald-100 hover:border-emerald-300/80"
+                        : "border-white/10 bg-slate-900/70 text-slate-100 hover:border-white/20"
+                    )}
+                    title={narrationEnabled ? "Narration: On" : "Narration: Off"}
+                    aria-pressed={narrationEnabled}
+                  >
+                    {narrationEnabled ? (
+                      <Volume2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                    ) : (
+                      <VolumeX className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                    )}
+                    <span className="hidden sm:inline">{narrationEnabled ? "Narration On" : "Narration Off"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopNarration}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-slate-900/70 px-2 py-1.5 text-[0.65rem] font-semibold text-slate-100 shadow-[0_0_25px_rgba(16,185,129,0.18)] transition hover:border-red-300/70 hover:text-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300 sm:gap-2 sm:px-3 sm:py-2 sm:text-xs"
+                    title="Stop narration"
+                  >
+                    <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                    <span className="hidden sm:inline">Stop</span>
                   </button>
                   <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 px-2.5 py-1 text-[0.65rem] font-medium text-white shadow-[0_0_25px_rgba(16,185,129,0.35)] sm:gap-2 sm:px-4 sm:py-1 sm:text-sm">
                     <span className="flex h-2 w-2 animate-pulse rounded-full bg-white sm:h-2.5 sm:w-2.5" />
