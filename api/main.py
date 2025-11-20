@@ -1621,6 +1621,70 @@ async def _get_conversation_history(session_id: Optional[str]) -> List[Dict[str,
         return []
 
 
+def _filter_md_sources(citations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filter citations to only include reference links (URLs) from .md files.
+    Returns clean citations with only source name and URL - similar to Perplexity.
+    No file paths, IDs, or internal references are included.
+    
+    Handles multiple cases:
+    1. Citations with url field (already filtered, from database) - uses directly
+    2. Citations with reference_sources (from ChromaDB, needs extraction)
+    3. Citations with just source and url (simplified format)
+    """
+    filtered = []
+    seen_urls = set()  # Track URLs to avoid duplicates
+    
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+            
+        source = citation.get("source", "")
+        url = citation.get("url", "")
+        
+        # Case 1: Citation already has URL field (most common - from database)
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            # Return only source name and URL - clean structure like Perplexity
+            filtered.append({
+                "source": source or url,  # Source name/title
+                "url": url,  # The actual URL to open
+            })
+            continue
+        
+        # Case 2: Citation has reference_sources (from ChromaDB, needs extraction)
+        reference_sources = citation.get("reference_sources", [])
+        
+        # Check if it's from a .md file (source ends with .md or contains .md)
+        is_md_file = source and (source.endswith(".md") or ".md" in source)
+        
+        # Extract reference sources (URLs) from the citation
+        # Only include citations that have reference links (URLs)
+        if reference_sources and isinstance(reference_sources, list) and len(reference_sources) > 0:
+            for ref in reference_sources:
+                if isinstance(ref, dict):
+                    ref_url = ref.get("url", "")
+                    ref_name = ref.get("name", "")
+                    # Only add if URL is valid and not already seen
+                    if ref_url and ref_url not in seen_urls:
+                        seen_urls.add(ref_url)
+                        # Return only source name and URL - clean structure like Perplexity
+                        filtered.append({
+                            "source": ref_name or source or ref_url,  # Source name/title (e.g., "NHS — Chest Pain Advice")
+                            "url": ref_url,  # The actual URL to open
+                        })
+        # If no reference_sources but it's a .md file, still include it with source as name
+        elif is_md_file and source:
+            # Include .md file citations even without URLs (for display purposes)
+            # Use source as both name and a placeholder
+            filtered.append({
+                "source": source,
+                "url": f"file://{source}",  # Create a file URL for .md sources
+            })
+    
+    return filtered
+
+
 def process_chat_request(
     request: ChatRequest, 
     conversation_history: Optional[List[Dict[str, str]]] = None
@@ -1889,10 +1953,15 @@ def process_chat_request(
         rag_results = retrieve(enhanced_query, k=3)
         timings["retrieval"] = time.perf_counter() - rag_start
         context = "\n\n".join([r["chunk"] for r in rag_results])
-        citations = [
-            {"source": r["source"], "id": r["id"], "topic": r.get("topic")}
+        citations = _filter_md_sources([
+            {
+                "source": r["source"], 
+                "id": r["id"], 
+                "topic": r.get("topic"),
+                "reference_sources": r.get("reference_sources", [])
+            }
             for r in rag_results
-        ]
+        ])
         debug_info["rag_context_snippets"] = [r["chunk"][:200] for r in rag_results]
         debug_info["citations"] = citations
         
@@ -2024,10 +2093,15 @@ def process_chat_request(
             debug_info["answer_localized"] = localized_answer
         else:
             context = "\n\n".join([r["chunk"] for r in rag_results])
-            citations = [
-                {"source": r["source"], "id": r["id"], "topic": r.get("topic")}
+            citations = _filter_md_sources([
+                {
+                    "source": r["source"], 
+                    "id": r["id"], 
+                    "topic": r.get("topic"),
+                    "reference_sources": r.get("reference_sources", [])
+                }
                 for r in rag_results
-            ]
+            ])
             debug_info["citations"] = citations
 
             personalized_conditions: List[str] = []
@@ -2142,11 +2216,15 @@ def process_chat_request(
     debug_info.setdefault("citations", citations)
     debug_info.setdefault("rag_context_snippets", [])
 
+    # Citations structure for frontend:
+    # Each citation has: {"source": "NHS — Chest Pain Advice", "url": "https://..."}
+    # Frontend should display as FAQ-style accordion (default closed)
+    # When opened, show links in ordered list or bubbles
     response = ChatResponse(
         answer=answer,
         route=route,
         facts=facts_response,
-        citations=citations,
+        citations=citations,  # Clean citations with only source name and URL - ready for accordion display
         safety=safety_payload,
         metadata={},
     )
@@ -2208,6 +2286,14 @@ async def save_chat_messages_background(
         # Convert safety to dict
         safety_dict = assistant_response.safety.model_dump() if hasattr(assistant_response.safety, 'model_dump') else dict(assistant_response.safety)
         
+        # Log citations structure to verify URLs are being saved
+        if assistant_response.citations:
+            logger.info(f"💾 Saving citations with {len(assistant_response.citations)} entries for session {session_id[:8]}")
+            for idx, citation in enumerate(assistant_response.citations[:2]):  # Log first 2
+                logger.info(f"  Citation {idx}: source={citation.get('source')}, url={citation.get('url')}, has_url={'url' in citation}")
+        else:
+            logger.warning(f"⚠️ No citations to save for session {session_id[:8]}")
+        
         # Save assistant response
         await db_service.save_chat_message(
             session_id=session_id,
@@ -2218,9 +2304,10 @@ async def save_chat_messages_background(
             route=assistant_response.route,
             safety_data=safety_dict,
             facts=assistant_response.facts,
-            citations=assistant_response.citations,
+            citations=assistant_response.citations,  # Citations with URLs are saved to NeonDB as JSONB
             metadata=assistant_response.metadata,
         )
+        logger.info(f"✅ Saved message with {len(assistant_response.citations) if assistant_response.citations else 0} citations to database")
         
         # Invalidate cache for customer sessions and session messages after saving
         cache_invalidated = 0
@@ -2244,11 +2331,35 @@ async def save_chat_messages_background(
                 await cache_service.delete(f"session_full:{session_id}")
                 cache_invalidated += 1
                 logger.debug(f"Invalidated cache: session_full:{session_id}")
-                # Invalidate conversation history cache (used for AI context)
+                
+                # Update conversation history cache instead of invalidating it
+                # This avoids fetching from DB on every new message
                 conversation_history_key = f"conversation_history:{session_id}"
-                await cache_service.delete(conversation_history_key)
-                cache_invalidated += 1
-                logger.debug(f"Invalidated cache: {conversation_history_key}")
+                try:
+                    # Get existing cached history
+                    existing_history = await cache_service.get(conversation_history_key)
+                    if existing_history is None:
+                        existing_history = []
+                    
+                    # Append new messages to the cached history
+                    # Format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+                    new_messages = [
+                        {"role": "user", "content": user_message},
+                        {"role": "assistant", "content": assistant_response.answer}
+                    ]
+                    
+                    # Append new messages and keep only last 20 messages (limit used in _get_conversation_history)
+                    updated_history = (existing_history + new_messages)[-20:]
+                    
+                    # Update cache with new history (2 minute TTL)
+                    await cache_service.set(conversation_history_key, updated_history, ttl=120)
+                    logger.debug(f"Updated conversation history cache: {conversation_history_key} (now has {len(updated_history)} messages)")
+                except Exception as cache_error:
+                    # If cache update fails, just invalidate it (fallback)
+                    logger.warning(f"Failed to update conversation history cache, invalidating instead: {cache_error}")
+                    await cache_service.delete(conversation_history_key)
+                    cache_invalidated += 1
+                    logger.debug(f"Invalidated cache: {conversation_history_key}")
         except Exception as e:
             logger.warning(f"Failed to invalidate cache: {e}", exc_info=True)
         
@@ -2294,6 +2405,15 @@ async def chat(
         customer_id = user.get("user_id") or request.customer_id
         session_id = request.session_id
         
+        # Resolve hashed session ID if needed
+        if session_id:
+            from .services.session_hash import resolve_session_id, is_hashed_session_id
+            if is_hashed_session_id(session_id):
+                resolved_id = await resolve_session_id(session_id, db_service, customer_id=customer_id)
+                if resolved_id:
+                    session_id = resolved_id
+                # If resolution fails, continue with None (will create new session)
+        
         # Prepare session in background (non-blocking, but needed for message saving)
         if db_client.is_connected():
             try:
@@ -2326,6 +2446,12 @@ async def chat(
                 
                 if chat_session:
                     session_id = chat_session["id"]
+                    # Store hash mapping for the session
+                    try:
+                        from .services.session_hash import store_session_hash_mapping
+                        await store_session_hash_mapping(session_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to store session hash mapping: {e}")
             except HTTPException:
                 raise
             except Exception as e:
@@ -2499,10 +2625,28 @@ async def process_chat_request_stream(
     rag_results = retrieve(enhanced_query, k=4)
     pipeline_timings["rag_retrieval"] = time.perf_counter() - rag_start
     context = "\n\n".join([r["chunk"] for r in rag_results]) if rag_results else ""
-    citations = [
-        {"source": r["source"], "id": r["id"], "topic": r.get("topic")}
-        for r in rag_results
-    ]
+    
+    # Build citations from RAG results
+    raw_citations = []
+    if rag_results:
+        for r in rag_results:
+            citation = {
+                "source": r.get("source", "unknown"), 
+                "id": r.get("id", ""), 
+                "topic": r.get("topic"),
+                "reference_sources": r.get("reference_sources", [])
+            }
+            raw_citations.append(citation)
+            logger.debug(f"RAG result citation: source={citation['source']}, has_refs={len(citation.get('reference_sources', []))}")
+    
+    logger.info(f"📚 Generated {len(raw_citations)} raw citations from {len(rag_results) if rag_results else 0} RAG results")
+    
+    # Filter citations
+    citations = _filter_md_sources(raw_citations) if raw_citations else []
+    
+    logger.info(f"🔍 After filtering: {len(citations)} citations remain (from {len(raw_citations)} raw citations)")
+    if len(raw_citations) > 0 and len(citations) == 0:
+        logger.warning(f"⚠️ All citations filtered out! Sample raw citation: {json.dumps(raw_citations[0] if raw_citations else {}, indent=2)}")
     
     # Extract symptoms from current query
     current_symptoms = extract_symptoms(processed_text)
@@ -2690,6 +2834,15 @@ async def chat_stream(
         customer_id = user.get("user_id") or request.customer_id
         session_id = request.session_id
         
+        # Resolve hashed session ID if needed
+        if session_id:
+            from .services.session_hash import resolve_session_id, is_hashed_session_id
+            if is_hashed_session_id(session_id):
+                resolved_id = await resolve_session_id(session_id, db_service, customer_id=customer_id)
+                if resolved_id:
+                    session_id = resolved_id
+                # If resolution fails, continue with None (will create new session)
+        
         # Prepare session
         if db_client.is_connected():
             try:
@@ -2716,10 +2869,16 @@ async def chat_stream(
                 
                 if chat_session:
                     session_id = chat_session["id"]
+                    # Store hash mapping for the session
+                    try:
+                        from .services.session_hash import store_session_hash_mapping
+                        await store_session_hash_mapping(session_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to store session hash mapping: {e}")
             except HTTPException:
                 raise
             except Exception as e:
-                    logger.warning(f"Failed to prepare customer/session data: {e}", exc_info=True)
+                logger.warning(f"Failed to prepare customer/session data: {e}", exc_info=True)
         
         # Retrieve conversation history for context
         # Prefer conversation_history from request (for real-time testing), fall back to database
@@ -2746,6 +2905,12 @@ async def chat_stream(
         # Stream the response
         async def generate():
             full_answer = ""
+            citations = []
+            facts = []
+            safety_data = None
+            route = "vector"
+            metadata = {}
+            
             async for chunk_data in process_chat_request_stream(
                 request, 
                 conversation_history=conversation_history,
@@ -2753,7 +2918,7 @@ async def chat_stream(
                 customer_id=customer_id
             ):
                 yield chunk_data
-                # Extract content from chunks to build full answer
+                # Extract content and metadata from chunks
                 try:
                     if chunk_data.startswith("data: "):
                         data_str = chunk_data[6:]  # Remove "data: " prefix
@@ -2761,35 +2926,62 @@ async def chat_stream(
                         if data.get("type") == "chunk":
                             full_answer += data.get("content", "")
                         elif data.get("type") == "done":
+                            # Extract all metadata from the "done" event
                             full_answer = data.get("answer", full_answer)
-                except:
+                            citations = data.get("citations", [])
+                            facts = data.get("facts", [])
+                            safety = data.get("safety", {})
+                            route = data.get("route", "vector")
+                            metadata = data.get("metadata", {})
+                            
+                            # Convert safety dict to Safety object if needed
+                            if safety and isinstance(safety, dict):
+                                from .models import Safety, MentalHealthSafety, PregnancySafety
+                                safety_data = Safety(
+                                    red_flag=safety.get("red_flag", False),
+                                    mental_health=MentalHealthSafety(
+                                        crisis=safety.get("mental_health", {}).get("crisis", False),
+                                        matched=safety.get("mental_health", {}).get("matched", []),
+                                        first_aid=safety.get("mental_health", {}).get("first_aid", [])
+                                    ),
+                                    pregnancy=PregnancySafety(
+                                        concern=safety.get("pregnancy", {}).get("concern", False),
+                                        matched=safety.get("pregnancy", {}).get("matched", [])
+                                    )
+                                )
+                except Exception as e:
+                    logger.warning(f"Error parsing chunk data: {e}")
                     pass
             
             # Save messages in background after streaming completes
             if db_client.is_connected() and session_id and full_answer:
                 try:
-                    # Create a minimal ChatResponse for saving
+                    # Create ChatResponse with actual data from streaming (including citations!)
                     from .models import Safety, MentalHealthSafety, PregnancySafety
-                    safety_data = Safety(
-                        red_flag=False,
-                        mental_health=MentalHealthSafety(
-                            crisis=False,
-                            matched=[],
-                            first_aid=[]
-                        ),
-                        pregnancy=PregnancySafety(
-                            concern=False,
-                            matched=[]
+                    if not safety_data:
+                        safety_data = Safety(
+                            red_flag=False,
+                            mental_health=MentalHealthSafety(
+                                crisis=False,
+                                matched=[],
+                                first_aid=[]
+                            ),
+                            pregnancy=PregnancySafety(
+                                concern=False,
+                                matched=[]
+                            )
                         )
-                    )
+                    
                     response_obj = ChatResponse(
                         answer=full_answer,
-                        route="vector",
-                        facts=[],
-                        citations=[],
+                        route=route,
+                        facts=facts,
+                        citations=citations,  # Use actual citations from streaming!
                         safety=safety_data,
-                        metadata={}
+                        metadata=metadata
                     )
+                    
+                    logger.info(f"💾 Queueing save with {len(citations)} citations for session {session_id[:8]}")
                     
                     background_tasks.add_task(
                         save_chat_messages_background,
@@ -2942,6 +3134,13 @@ async def voice_chat(
                 )
                 
                 if chat_session:
+                    session_id = chat_session["id"]
+                    # Store hash mapping for the session
+                    try:
+                        from .services.session_hash import store_session_hash_mapping
+                        await store_session_hash_mapping(session_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to store session hash mapping: {e}")
                     session_id = chat_session["id"]
             except HTTPException:
                 raise
@@ -3199,19 +3398,18 @@ async def get_customer_sessions(
     sessions = await db_service.get_customer_sessions(customer_id, limit=limit)
     result = []
     for session in sessions:
-        # Get first user message for title
-        first_message = await db_service.get_session_first_message(session["id"])
-        # Get message count for this session
-        messages = await db_service.get_session_messages(session["id"], limit=1000)
+        # Use last_activity_at (last message time) if available, otherwise use session created_at
+        last_activity = session.get("last_activity_at") or session.get("created_at")
         result.append({
             "id": session["id"],
             "customerId": session["customer_id"],
             "createdAt": session["created_at"].isoformat() if session.get("created_at") else None,
             "updatedAt": session["updated_at"].isoformat() if session.get("updated_at") else None,
+            "lastActivityAt": last_activity.isoformat() if last_activity else None,  # Last message time (for display)
             "language": session.get("language"),
             "sessionMetadata": session.get("session_metadata"),
-            "messageCount": len(messages),
-            "firstMessage": first_message.get("message_text") if first_message else None,
+            "messageCount": session.get("message_count", 0),  # Already included in query
+            "firstMessage": session.get("first_message_text"),  # Already included in query
         })
     
     # Cache the result for 5 minutes (300 seconds)
@@ -3230,11 +3428,28 @@ async def get_session_messages(
     Get messages for a session
     Requires authentication
     Users can only view messages from their own sessions, admins can view any messages
+    Accepts both hashed session IDs and UUIDs
     """
-    # Validate path parameter to prevent SQL injection
-    from .auth.validation import validate_uuid, validate_query_limit
+    from .services.session_hash import resolve_session_id, is_hashed_session_id
+    from .auth.validation import validate_query_limit
+    
+    # Resolve hashed session ID if needed
+    user_id = user.get("user_id")
+    if is_hashed_session_id(session_id):
+        resolved_id = await resolve_session_id(session_id, db_service, customer_id=user_id)
+        if not resolved_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session_id = resolved_id
+    else:
+        # Validate UUID format
+        from .auth.validation import validate_uuid
+        try:
+            session_id = validate_uuid(session_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    
+    # Validate limit
     try:
-        session_id = validate_uuid(session_id)
         limit = validate_query_limit(limit, max_limit=1000, min_limit=1)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3263,12 +3478,60 @@ async def get_session_messages(
     cached_messages = await cache_service.get(cache_key)
     if cached_messages is not None:
         logger.debug(f"Cache hit for session messages: {session_id}")
-        return cached_messages
+        # Apply filter to cached messages as well to ensure only .md sources are shown
+        filtered_cached = []
+        for msg in cached_messages:
+            filtered_msg = msg.copy()
+            # Parse citations if it's a string
+            citations = filtered_msg.get("citations")
+            if isinstance(citations, str):
+                try:
+                    citations = json.loads(citations) if citations else []
+                except (json.JSONDecodeError, TypeError):
+                    citations = []
+            elif citations is None:
+                citations = []
+            # Filter citations to only show .md file references
+            filtered_msg["citations"] = _filter_md_sources(citations) if citations else []
+            filtered_cached.append(filtered_msg)
+        return filtered_cached
     
     # If not in cache, fetch from database
     messages = await db_service.get_session_messages(session_id, limit=limit)
-    result = [
-        {
+    result = []
+    for message in messages:
+        # Parse citations from JSONB if it's a string
+        citations = message.get("citations")
+        if isinstance(citations, str):
+            try:
+                citations = json.loads(citations) if citations else []
+            except (json.JSONDecodeError, TypeError):
+                citations = []
+        elif citations is None:
+            citations = []
+        
+        # Debug: Log citations before filtering
+        if message.get("role") == "assistant" and citations:
+            logger.debug(f"Message {message.get('id')} has {len(citations)} citations before filtering")
+            logger.debug(f"Sample citation structure: {citations[0] if citations else 'None'}")
+        
+        # Filter citations to only show .md file references for old messages too
+        filtered_citations = _filter_md_sources(citations) if citations else []
+        
+        # Debug: Log citations for assistant messages
+        if message.get("role") == "assistant":
+            logger.info(f"Message {message.get('id')[:8]}... - Citations before filter: {len(citations)}, after filter: {len(filtered_citations)}")
+            if len(citations) > 0:
+                logger.info(f"Sample citation structure: {json.dumps(citations[0] if citations else {}, indent=2)}")
+            if len(citations) > 0 and len(filtered_citations) == 0:
+                logger.warning(f"⚠️ All citations filtered out for message {message.get('id')}. Original citations structure: {json.dumps(citations[:1], indent=2)}")
+                # TEMPORARY: Return unfiltered citations if filter removes all (for debugging)
+                # This helps us see what format the citations are in
+                if len(citations) > 0:
+                    logger.warning(f"⚠️ Returning unfiltered citations for debugging - message {message.get('id')[:8]}")
+                    filtered_citations = citations  # Return original for debugging
+        
+        result.append({
             "id": message["id"],
             "sessionId": message["session_id"],
             "createdAt": message["created_at"].isoformat() if message.get("created_at") else None,
@@ -3279,11 +3542,9 @@ async def get_session_messages(
             "answer": message.get("answer"),
             "safetyData": message.get("safety_data"),
             "facts": message.get("facts"),
-            "citations": message.get("citations"),
+            "citations": filtered_citations,  # Always include citations, even if empty
             "metadata": message.get("metadata"),
-        }
-        for message in messages
-    ]
+        })
     
     # Cache the result for 5 minutes (300 seconds)
     await cache_service.set(cache_key, result, ttl=300)
@@ -3300,20 +3561,30 @@ async def delete_session(
     Delete a chat session and all its messages
     Requires authentication
     Users can only delete their own sessions, admins can delete any session
+    Accepts both hashed session IDs and UUIDs
     """
-    # Validate path parameter to prevent SQL injection
-    from .auth.validation import validate_uuid
-    try:
-        session_id = validate_uuid(session_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    from .services.session_hash import resolve_session_id, is_hashed_session_id
+    
+    # Resolve hashed session ID if needed
+    user_id = user.get("user_id")
+    if is_hashed_session_id(session_id):
+        resolved_id = await resolve_session_id(session_id, db_service, customer_id=user_id)
+        if not resolved_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session_id = resolved_id
+    else:
+        # Validate UUID format
+        from .auth.validation import validate_uuid
+        try:
+            session_id = validate_uuid(session_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     
     if not db_client.is_connected():
         raise HTTPException(status_code=503, detail="Database not available")
     
     # Verify session belongs to user (unless admin)
     user_role = user.get("role", "user")
-    user_id = user.get("user_id")
     
     if user_role != "admin":
         # Get session to verify ownership
@@ -3364,13 +3635,24 @@ async def get_session(
     Requires authentication
     Users can only view their own sessions, admins can view any session
     Cached in Redis for 5 minutes
+    Accepts both hashed session IDs and UUIDs
     """
-    # Validate path parameter to prevent SQL injection
-    from .auth.validation import validate_uuid
-    try:
-        session_id = validate_uuid(session_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    from .services.session_hash import resolve_session_id, is_hashed_session_id
+    
+    # Resolve hashed session ID if needed
+    user_id = user.get("user_id")
+    if is_hashed_session_id(session_id):
+        resolved_id = await resolve_session_id(session_id, db_service, customer_id=user_id)
+        if not resolved_id:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session_id = resolved_id
+    else:
+        # Validate UUID format
+        from .auth.validation import validate_uuid
+        try:
+            session_id = validate_uuid(session_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     
     if not db_client.is_connected():
         raise HTTPException(status_code=503, detail="Database not available")
@@ -3388,6 +3670,20 @@ async def get_session(
                 status_code=403,
                 detail="You can only view your own sessions"
             )
+        # Apply filter to cached session messages as well
+        if "messages" in cached_session:
+            for msg in cached_session["messages"]:
+                # Parse citations if it's a string
+                citations = msg.get("citations")
+                if isinstance(citations, str):
+                    try:
+                        citations = json.loads(citations) if citations else []
+                    except (json.JSONDecodeError, TypeError):
+                        citations = []
+                elif citations is None:
+                    citations = []
+                # Filter citations to only show .md file references
+                msg["citations"] = _filter_md_sources(citations) if citations else []
         return cached_session
     
     try:
@@ -3421,6 +3717,36 @@ async def get_session(
         # Get messages
         messages = chat_session.get("messages", [])
         
+        # Process messages to ensure citations are properly parsed and filtered
+        processed_messages = []
+        for message in messages:
+            # Parse citations from JSONB if it's a string
+            citations = message.get("citations")
+            if isinstance(citations, str):
+                try:
+                    citations = json.loads(citations) if citations else []
+                except (json.JSONDecodeError, TypeError):
+                    citations = []
+            elif citations is None:
+                citations = []
+            
+            # Filter citations to only show .md file references
+            filtered_citations = _filter_md_sources(citations) if citations else []
+            
+            processed_messages.append({
+                "id": message["id"],
+                "createdAt": message["created_at"].isoformat() if message.get("created_at") else None,
+                "role": message["role"],
+                "messageText": message["message_text"],
+                "language": message.get("language"),
+                "route": message.get("route"),
+                "answer": message.get("answer"),
+                "safetyData": message.get("safety_data"),
+                "facts": message.get("facts"),
+                "citations": filtered_citations,  # Always include citations, even if empty
+                "metadata": message.get("metadata"),
+            })
+        
         result = {
             "id": chat_session["id"],
             "customerId": chat_session["customer_id"],
@@ -3429,22 +3755,7 @@ async def get_session(
             "language": chat_session.get("language"),
             "sessionMetadata": chat_session.get("session_metadata"),
             "customer": customer,
-            "messages": [
-                {
-                    "id": message["id"],
-                    "createdAt": message["created_at"].isoformat() if message.get("created_at") else None,
-                    "role": message["role"],
-                    "messageText": message["message_text"],
-                    "language": message.get("language"),
-                    "route": message.get("route"),
-                    "answer": message.get("answer"),
-                    "safetyData": message.get("safety_data"),
-                    "facts": message.get("facts"),
-                    "citations": message.get("citations"),
-                    "metadata": message.get("metadata"),
-                }
-                for message in messages
-            ],
+            "messages": processed_messages,
         }
         
         # Cache the result for 5 minutes (300 seconds)

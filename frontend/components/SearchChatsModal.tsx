@@ -10,6 +10,7 @@ interface ChatSession {
   customerId: string;
   createdAt: string;
   updatedAt: string;
+  lastActivityAt?: string;
   language?: string;
   messageCount: number;
   firstMessage?: string;
@@ -42,8 +43,8 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession, cus
     setLoading(true);
     setError(null);
     try {
-      // Fetch sessions for this customer
-      const response = await apiClient.get(`/customer/${customerId}/sessions?limit=1000`);
+      // Fetch sessions for this customer (limit to 100 for search modal)
+      const response = await apiClient.get(`/customer/${customerId}/sessions?limit=100`);
       setSessions(response.data || []);
     } catch (err: any) {
       console.error('Error fetching sessions:', err);
@@ -69,6 +70,7 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession, cus
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
+    // Calculate difference in milliseconds (works correctly with UTC timestamps)
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
@@ -78,7 +80,8 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession, cus
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    // Format date in IST timezone
+    return date.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
   };
 
   if (!isOpen) return null;
@@ -153,7 +156,7 @@ export default function SearchChatsModal({ isOpen, onClose, onSelectSession, cus
                       <div className="flex items-center gap-2 mb-1">
                         <Clock className="h-4 w-4 text-slate-400 flex-shrink-0" />
                         <span className="text-xs text-slate-400 truncate">
-                          {formatDate(session.createdAt)}
+                          {formatDate(session.lastActivityAt || session.createdAt)}
                         </span>
                         {session.language && (
                           <span className="text-xs text-emerald-400/70">

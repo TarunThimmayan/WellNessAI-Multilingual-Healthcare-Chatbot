@@ -316,6 +316,15 @@ class DatabaseService:
         
         try:
             message_id = str(uuid.uuid4())
+            
+            # Log citations being saved (for assistant messages)
+            if role == "assistant" and citations:
+                logger.info(f"💾 Saving citations for message {message_id[:8]}: {len(citations)} citations")
+                logger.debug(f"   Citations data: {json.dumps(citations[:2] if len(citations) > 2 else citations, indent=2)}")
+            elif role == "assistant":
+                logger.warning(f"⚠️ No citations provided for assistant message {message_id[:8]}")
+            
+            # Save message
             message = await db_client.fetchrow(
                 """
                 INSERT INTO chat_messages (
@@ -331,7 +340,12 @@ class DatabaseService:
                 json.dumps(citations) if citations else None,
                 json.dumps(metadata) if metadata else None
             )
-            logger.debug(f"Saved chat message: {message_id}")
+            # Update session's updated_at to reflect last activity (last message time)
+            await db_client.execute(
+                "UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1",
+                session_id
+            )
+            logger.debug(f"Saved chat message: {message_id} and updated session last activity")
             return dict(message) if message else None
         except Exception as e:
             logger.error(f"Error saving chat message: {e}", exc_info=True)
@@ -357,11 +371,25 @@ class DatabaseService:
             return []
         
         try:
+            # Get sessions with last activity time, message count, and first message in one query
             sessions = await db_client.fetch(
                 """
-                SELECT * FROM chat_sessions
-                WHERE customer_id = $1
-                ORDER BY created_at DESC
+                SELECT 
+                    cs.*,
+                    COALESCE(MAX(cm.created_at), cs.created_at) as last_activity_at,
+                    COUNT(cm.id) as message_count,
+                    (
+                        SELECT message_text 
+                        FROM chat_messages 
+                        WHERE session_id = cs.id AND role = 'user' 
+                        ORDER BY created_at ASC 
+                        LIMIT 1
+                    ) as first_message_text
+                FROM chat_sessions cs
+                LEFT JOIN chat_messages cm ON cm.session_id = cs.id
+                WHERE cs.customer_id = $1
+                GROUP BY cs.id
+                ORDER BY last_activity_at DESC
                 LIMIT $2
                 """,
                 customer_id, limit
@@ -405,6 +433,37 @@ class DatabaseService:
             return None
     
     @staticmethod
+    async def get_session_message_count(session_id: str) -> int:
+        """
+        Get the count of messages in a session (efficient COUNT query)
+        
+        Args:
+            session_id: Session ID
+            
+        Returns:
+            Number of messages in the session
+        """
+        if not await db_client.ensure_connected():
+            logger.warning("Database not connected, cannot retrieve message count")
+            return 0
+        
+        try:
+            result = await db_client.fetchrow(
+                """
+                SELECT COUNT(*) as count
+                FROM chat_messages
+                WHERE session_id = $1
+                """,
+                session_id
+            )
+            if result:
+                return result.get("count", 0)
+            return 0
+        except Exception as e:
+            logger.error(f"Error retrieving message count: {e}", exc_info=True)
+            return 0
+    
+    @staticmethod
     async def get_session_messages(
         session_id: str,
         limit: int = 100
@@ -435,7 +494,40 @@ class DatabaseService:
                 session_id, limit
             )
             logger.info(f"Found {len(messages)} messages for session_id: {session_id}")
-            return [dict(m) for m in messages]
+            
+            # Parse JSONB fields properly
+            parsed_messages = []
+            for m in messages:
+                msg_dict = dict(m)
+                # Parse JSONB fields if they're strings
+                for json_field in ["citations", "facts", "safety_data", "metadata"]:
+                    if json_field in msg_dict:
+                        value = msg_dict[json_field]
+                        # Log raw value for citations to debug
+                        if json_field == "citations" and msg_dict.get("role") == "assistant":
+                            logger.info(f"🔍 Raw citations from DB for message {msg_dict.get('id', 'unknown')[:8]}: type={type(value)}, value={value}")
+                        
+                        if isinstance(value, str):
+                            try:
+                                parsed_value = json.loads(value) if value else None
+                                msg_dict[json_field] = parsed_value
+                                if json_field == "citations" and msg_dict.get("role") == "assistant":
+                                    logger.info(f"✅ Parsed citations: {len(parsed_value) if isinstance(parsed_value, list) else 'not a list'}")
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.warning(f"⚠️ Failed to parse {json_field}: {e}, value: {value}")
+                                msg_dict[json_field] = None
+                        elif value is None:
+                            # Ensure empty arrays for citations and facts, empty dict for others
+                            if json_field in ["citations", "facts"]:
+                                msg_dict[json_field] = []
+                            elif json_field in ["safety_data", "metadata"]:
+                                msg_dict[json_field] = {}
+                        # If value is already a list/dict (from JSONB), keep it as is
+                        elif json_field == "citations" and msg_dict.get("role") == "assistant":
+                            logger.info(f"✅ Citations already parsed: type={type(value)}, length={len(value) if isinstance(value, list) else 'N/A'}")
+                parsed_messages.append(msg_dict)
+            
+            return parsed_messages
         except Exception as e:
             logger.error(f"Error retrieving session messages: {e}", exc_info=True)
             return []

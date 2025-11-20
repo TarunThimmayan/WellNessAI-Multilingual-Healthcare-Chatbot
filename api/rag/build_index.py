@@ -5,6 +5,8 @@ import os
 import sys
 import re
 import yaml
+import json
+from datetime import date, datetime
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,6 +14,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def make_json_serializable(obj):
+    """Convert date/datetime objects to strings for JSON serialization"""
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    return obj
 
 
 def extract_frontmatter(content: str) -> tuple[dict, str]:
@@ -102,21 +115,30 @@ def build_index():
         topic = frontmatter.get("id", md_file.stem)
         sources = frontmatter.get("sources", [])
         
+        # Convert sources to JSON-serializable format (convert dates to strings)
+        serializable_sources = make_json_serializable(sources) if sources else []
+        
         # Chunk the content
         chunks = chunk_text(body)
         
         for idx, chunk in enumerate(chunks):
             documents.append(chunk)
-            metadatas.append(
-                {
-                    "source": str(relative_path),
-                    "source_file": md_file.name,
-                    "category": category,
-                    "title": title,
-                    "topic": topic,
-                    "chunk_id": idx,
-                }
-            )
+            # Prepare metadata - ChromaDB doesn't accept None values, so use empty JSON array string
+            metadata_dict = {
+                "source": str(relative_path),
+                "source_file": md_file.name,
+                "category": category,
+                "title": title,
+                "topic": topic,
+                "chunk_id": idx,
+            }
+            # Only add reference_sources if we have sources, otherwise use empty array string
+            if serializable_sources:
+                metadata_dict["reference_sources"] = json.dumps(serializable_sources)
+            else:
+                metadata_dict["reference_sources"] = "[]"  # Empty JSON array string instead of None
+            
+            metadatas.append(metadata_dict)
             # Use POSIX relative path (without extension) to guarantee unique IDs across folders
             relative_id = relative_path.with_suffix("").as_posix()
             ids.append(f"{relative_id}#{idx}")

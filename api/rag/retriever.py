@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from pathlib import Path
 from typing import List, Dict
 
@@ -139,6 +140,16 @@ def retrieve(query: str, k: int = 4) -> List[Dict[str, str]]:
                 chunk_id = ids[i] if i < len(ids) else f"unknown_{i}"
                 metadata = metadatas[i] if i < len(metadatas) and isinstance(metadatas[i], dict) else {}
                 
+                # Parse reference_sources from JSON string if present
+                reference_sources = metadata.get("reference_sources")
+                if isinstance(reference_sources, str):
+                    try:
+                        reference_sources = json.loads(reference_sources)
+                    except (json.JSONDecodeError, TypeError):
+                        reference_sources = []
+                elif reference_sources is None:
+                    reference_sources = []
+                
                 retrieved.append({
                     "chunk": chunk,
                     "id": chunk_id,
@@ -147,6 +158,7 @@ def retrieve(query: str, k: int = 4) -> List[Dict[str, str]]:
                     "category": metadata.get("category", "general"),
                     "title": metadata.get("title", metadata.get("topic", "unknown")),
                     "topic": metadata.get("topic", metadata.get("title", "unknown")),
+                    "reference_sources": reference_sources,  # Store the actual reference links
                 })
         
         return retrieved

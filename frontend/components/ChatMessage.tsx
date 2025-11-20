@@ -10,7 +10,7 @@ import clsx from "clsx";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import "katex/dist/katex.min.css";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { Check, Copy, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
 interface CodeBlockProps {
   className?: string;
   children?: React.ReactNode;
@@ -126,6 +126,7 @@ interface ChatMessageProps {
 function ChatMessage({ message, index }: ChatMessageProps) {
   const [formattedTime, setFormattedTime] = useState<string>("");
   const [copiedCitationKey, setCopiedCitationKey] = useState<string | null>(null);
+  const [sourcesExpanded, setSourcesExpanded] = useState<boolean>(false);
   const citationCopyTimeoutRef = useRef<number | null>(null);
 
   const markdownComponents: Components = useMemo(() => ({
@@ -332,13 +333,31 @@ function ChatMessage({ message, index }: ChatMessageProps) {
 
   useEffect(() => {
     try {
+      // Parse timestamp - ensure it's treated as UTC if it's an ISO string
+      const timestamp = message.timestamp;
+      
+      // Create Date object - JavaScript automatically handles ISO strings with timezone
+      // If timestamp is ISO format (e.g., "2025-01-20T17:22:00.000Z"), it will be parsed as UTC
+      const date = new Date(timestamp);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid timestamp:', timestamp);
+        setFormattedTime(timestamp);
+        return;
+      }
+      
+      // Format in IST timezone (UTC+5:30)
       const value = new Intl.DateTimeFormat("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
-      }).format(new Date(message.timestamp));
+        timeZone: "Asia/Kolkata", // IST timezone
+      }).format(date);
+      
       setFormattedTime(value);
     } catch (error) {
+      console.error('Error formatting timestamp:', error, message.timestamp);
       setFormattedTime(message.timestamp);
     }
   }, [message.timestamp]);
@@ -384,7 +403,7 @@ function ChatMessage({ message, index }: ChatMessageProps) {
         )}
         tabIndex={0}
       >
-        <header className="mb-3 flex items-center justify-between text-xs uppercase tracking-[0.32em]">
+        <header className="mb-4 flex items-center justify-between text-xs uppercase tracking-[0.32em]">
           <span
             className={clsx(
               "flex items-center gap-2 font-semibold",
@@ -424,71 +443,86 @@ function ChatMessage({ message, index }: ChatMessageProps) {
           </ReactMarkdown>
         </div>
 
-        {message.citations && message.citations.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-sm text-slate-100 shadow-[0_18px_45px_rgba(15,23,42,0.55)]">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.32em] text-emerald-200/80">
-              Sources
-            </p>
-            <div className="space-y-3">
-              {message.citations.map((citation, idx) => {
-                const key = citation.id ?? `citation-${idx}`;
-                const headline = citation.topic ?? citation.source ?? `Reference ${idx + 1}`;
-                const supporting: string[] = [];
-                if (citation.topic && citation.source) {
-                  supporting.push(citation.source);
-                }
-                if (!citation.topic && citation.source) {
-                  supporting.push(citation.source);
-                }
-                if (citation.id) {
-                  supporting.push(`ID: ${citation.id}`);
-                }
+        {message.citations && Array.isArray(message.citations) && message.citations.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/60 text-sm text-slate-100 shadow-[0_18px_45px_rgba(15,23,42,0.55)]">
+            <button
+              type="button"
+              onClick={() => setSourcesExpanded(!sourcesExpanded)}
+              className="w-full flex items-center justify-between p-4 text-left transition hover:bg-slate-900/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 rounded-t-2xl"
+              aria-expanded={sourcesExpanded}
+              aria-controls={`sources-content-${index}`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.32em] text-emerald-200/80">
+                Sources ({message.citations.length})
+              </p>
+              {sourcesExpanded ? (
+                <ChevronUp className="h-4 w-4 text-emerald-200/80" aria-hidden />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-emerald-200/80" aria-hidden />
+              )}
+            </button>
+            {sourcesExpanded && (
+              <div id={`sources-content-${index}`} className="px-4 pb-4 space-y-3">
+                {message.citations.map((citation, idx) => {
+                  const key = citation.id ?? `citation-${idx}`;
+                  const headline = citation.topic ?? citation.source ?? `Reference ${idx + 1}`;
+                  const supporting: string[] = [];
+                  if (citation.topic && citation.source) {
+                    supporting.push(citation.source);
+                  }
+                  if (!citation.topic && citation.source) {
+                    supporting.push(citation.source);
+                  }
+                  if (citation.id) {
+                    supporting.push(`ID: ${citation.id}`);
+                  }
 
-                return (
-                  <div
-                    key={key}
-                    className="rounded-xl border border-white/10 bg-slate-900/70 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.45)]"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="space-y-1">
-                        <p className="font-semibold text-slate-100">{headline}</p>
-                        {supporting.length > 0 && (
-                          <p className="text-xs text-slate-400">{supporting.join(' • ')}</p>
-                        )}
-                        {citation.url && !supporting.includes(citation.url) && (
-                          <p className="text-xs text-slate-500">{citation.url}</p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleCopyCitation(citation, idx)}
-                          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-emerald-300/60 hover:text-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
-                        >
-                          {copiedCitationKey === key ? (
-                            <Check className="h-4 w-4" aria-hidden />
-                          ) : (
-                            <Copy className="h-4 w-4" aria-hidden />
+                  return (
+                    <div
+                      key={key}
+                      className="rounded-xl border border-white/10 bg-slate-900/70 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.45)]"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-1">
+                          <p className="font-semibold text-slate-100">{headline}</p>
+                          {supporting.length > 0 && (
+                            <p className="text-xs text-slate-400">{supporting.join(' • ')}</p>
                           )}
-                          {copiedCitationKey === key ? 'Copied' : 'Copy notes'}
-                        </button>
-                        {citation.url && (
-                          <a
-                            href={citation.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 rounded-full border border-transparent bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_30px_rgba(16,185,129,0.35)] transition hover:scale-[1.02] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+                          {citation.url && !supporting.includes(citation.url) && (
+                            <p className="text-xs text-slate-500">{citation.url}</p>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCitation(citation, idx)}
+                            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold text-slate-100 transition hover:border-emerald-300/60 hover:text-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
                           >
-                            <ExternalLink className="h-4 w-4" aria-hidden />
-                            Open
-                          </a>
-                        )}
+                            {copiedCitationKey === key ? (
+                              <Check className="h-4 w-4" aria-hidden />
+                            ) : (
+                              <Copy className="h-4 w-4" aria-hidden />
+                            )}
+                            {copiedCitationKey === key ? 'Copied' : 'Copy notes'}
+                          </button>
+                          {citation.url && (
+                            <a
+                              href={citation.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-full border border-transparent bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_30px_rgba(16,185,129,0.35)] transition hover:scale-[1.02] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+                            >
+                              <ExternalLink className="h-4 w-4" aria-hidden />
+                              Open
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

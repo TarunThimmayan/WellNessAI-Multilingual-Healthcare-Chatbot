@@ -9,4 +9,3 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
-

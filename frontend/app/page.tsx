@@ -143,7 +143,11 @@ const createId = () =>
 
 const formatTimestamp = () => new Date().toISOString();
 
-export default function Home() {
+interface HomeProps {
+  initialSessionId?: string;
+}
+
+export default function Home({ initialSessionId }: HomeProps = {}) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -172,20 +176,32 @@ export default function Home() {
     customerId: string;
     createdAt: string;
     updatedAt: string;
+    lastActivityAt?: string;
     language?: string;
     messageCount: number;
     firstMessage?: string;
   }>>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(initialSessionId || null);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [narrationEnabled, setNarrationEnabled] = useState<boolean>(true);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
+  const [userDisplayName, setUserDisplayName] = useState<string>('User');
 
   // Persist narration preference per user (email) with a sensible default of enabled
   const narrationPrefKey = useMemo(() => {
     const user = getAuthUser();
     const userKey = user?.email ?? 'guest';
     return `narration_enabled:${userKey}`;
+  }, [isAuthChecked]);
+
+  // Set user display name on client side only (prevents hydration mismatch)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && isAuthChecked) {
+      const user = getAuthUser();
+      const displayName = user?.fullName || user?.email?.split('@')[0] || 'User';
+      setUserDisplayName(displayName);
+    }
   }, [isAuthChecked]);
 
   useEffect(() => {
@@ -271,21 +287,38 @@ export default function Home() {
   // Debounce timer for session loading (prevents excessive API calls)
   const sessionLoadTimerRef = useRef<number | null>(null);
 
-  // Internal function that actually fetches sessions
-  const loadChatSessionsInternal = useCallback(async (customerId: string) => {
+  // Internal function that actually fetches sessions (on-demand only)
+  const loadChatSessionsInternal = useCallback(async (customerId: string, forceRefresh: boolean = false) => {
     if (!customerId) return;
     
     setSessionsLoading(true);
     try {
-      // Try cache first
-      const cachedSessions = loadChatSessionsFromCache(customerId);
-      if (cachedSessions && cachedSessions.length > 0) {
-        setChatSessions(cachedSessions);
-        setSessionsLoading(false);
+      // Try cache first (only if not forcing refresh)
+      if (!forceRefresh) {
+        const cachedSessions = loadChatSessionsFromCache(customerId);
+        if (cachedSessions && cachedSessions.length > 0) {
+          // Use cached data immediately (show instantly)
+          setChatSessions(cachedSessions);
+          setSessionsLoading(false);
+          // Fetch from API in background to update cache (non-blocking, silent update)
+          // Only fetch recent 50 sessions for performance
+          apiClient.get(`/customer/${customerId}/sessions?limit=50`)
+            .then((response) => {
+              const sessions = response.data || [];
+              setChatSessions(sessions);
+              saveChatSessionsToCache(customerId, sessions);
+            })
+            .catch((err) => {
+              console.warn('Background session refresh failed:', err);
+              // Keep using cached data on error
+            });
+          return;
+        }
       }
 
-      // Fetch from API
-      const response = await apiClient.get(`/customer/${customerId}/sessions?limit=1000`);
+      // If no cache or force refresh, fetch from API
+      // Only fetch recent 50 sessions for performance
+      const response = await apiClient.get(`/customer/${customerId}/sessions?limit=50`);
       const sessions = response.data || [];
       setChatSessions(sessions);
       saveChatSessionsToCache(customerId, sessions);
@@ -293,7 +326,9 @@ export default function Home() {
       console.error('Error loading chat sessions:', err);
       // Keep cached data if API fails
       const cachedSessions = loadChatSessionsFromCache(customerId);
-      if (!cachedSessions || cachedSessions.length === 0) {
+      if (cachedSessions && cachedSessions.length > 0) {
+        setChatSessions(cachedSessions);
+      } else {
         setChatSessions([]);
       }
     } finally {
@@ -311,15 +346,15 @@ export default function Home() {
       sessionLoadTimerRef.current = null;
     }
     
-    // If immediate flag is set, load right away (e.g., after sending a message)
+    // If immediate flag is set, load right away with force refresh (e.g., after sending a message)
     if (immediate) {
-      await loadChatSessionsInternal(customerId);
+      await loadChatSessionsInternal(customerId, true);
       return;
     }
     
-    // Otherwise, debounce the call (wait 500ms after last call)
+    // Otherwise, debounce the call (wait 500ms after last call) - use cache if available
     sessionLoadTimerRef.current = window.setTimeout(() => {
-      loadChatSessionsInternal(customerId);
+      loadChatSessionsInternal(customerId, false);
       sessionLoadTimerRef.current = null;
     }, 500);
   }, [loadChatSessionsInternal]);
@@ -349,10 +384,32 @@ export default function Home() {
             // Use cache if less than 5 minutes old
             if (Date.now() - timestamp < 5 * 60 * 1000 && data?.id) {
               setCustomerId(data.id);
+              // Fetch from API in background to update cache (non-blocking)
+              apiClient.get('/auth/me')
+                .then((response) => {
+                  if (response.data?.id) {
+                    setCustomerId(response.data.id);
+                    // Save to browser cache
+                    try {
+                      const cacheData = {
+                        data: response.data,
+                        timestamp: Date.now(),
+                      };
+                      localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+                    } catch (err) {
+                      console.warn('Error saving user info to cache:', err);
+                    }
+                  }
+                })
+                .catch((err) => {
+                  console.warn('Background user info refresh failed:', err);
+                  // Keep using cached data on error
+                });
+              return;
             }
           }
           
-          // Fetch from API
+          // If no cache or cache is stale, fetch from API
           const response = await apiClient.get('/auth/me');
           if (response.data?.id) {
             setCustomerId(response.data.id);
@@ -369,6 +426,19 @@ export default function Home() {
           }
         } catch (err) {
           console.error('Error fetching user info:', err);
+          // If API fails but we have cached data, use it
+          const cacheKey = 'user_info';
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            try {
+              const { data } = JSON.parse(cached);
+              if (data?.id) {
+                setCustomerId(data.id);
+              }
+            } catch (parseErr) {
+              console.warn('Error parsing cached user info:', parseErr);
+            }
+          }
         }
       };
       fetchUserInfo();
@@ -420,16 +490,250 @@ export default function Home() {
     };
   }, [isAuthChecked]);
 
-  // Load chat sessions when customerId is available
+  // Load session if initialSessionId is provided
   useEffect(() => {
-    if (customerId && isAuthChecked) {
+    console.log('Session loading effect triggered:', {
+      initialSessionId,
+      isAuthChecked,
+      customerId,
+      hasInitialSessionId: !!initialSessionId
+    });
+    
+    if (initialSessionId && isAuthChecked && customerId) {
+      setIsLoadingSession(true);
+      const loadInitialSession = async () => {
+        try {
+          // Try cache first, but only use it if citations are present
+          const cacheKey = `session_messages_${initialSessionId}`;
+          let useCache = false;
+          try {
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+              const { data, timestamp } = JSON.parse(cached);
+              if (Date.now() - timestamp < 5 * 60 * 1000 && data && Array.isArray(data) && data.length > 0) {
+                // Check if cached messages have citations (at least for assistant messages)
+                const hasCitations = data.some((msg: any) => {
+                  if (msg.role === 'assistant') {
+                    const citations = msg.citations || msg.citation;
+                    return citations && (Array.isArray(citations) ? citations.length > 0 : true);
+                  }
+                  return true; // User messages don't need citations
+                });
+                
+                if (hasCitations) {
+                  console.log('Loading from cache:', data.length, 'messages');
+                  console.log('First cached message citations:', data[0]?.citations);
+                  const chatEntries: ChatEntry[] = data.map((msg: any) => {
+                    // Handle citations - check multiple possible field names
+                    let citations = [];
+                    if (msg.citations) {
+                      citations = Array.isArray(msg.citations) ? msg.citations : [msg.citations];
+                    } else if (msg.citation) {
+                      citations = Array.isArray(msg.citation) ? msg.citation : [msg.citation];
+                    }
+                    
+                    return {
+                      id: msg.id,
+                      role: msg.role,
+                      content: msg.role === 'assistant' 
+                        ? (msg.answer || msg.messageText || '') 
+                        : (msg.messageText || msg.answer || ''),
+                      timestamp: msg.createdAt || formatTimestamp(),
+                      language: msg.language || lang,
+                      route: msg.route,
+                      safety: msg.safetyData,
+                      facts: msg.facts,
+                      citations: citations,
+                    };
+                  });
+                  console.log('Cached entries citations:', chatEntries[0]?.citations);
+                  
+                  // Get real session ID from first message if available
+                  const realSessionId = data[0]?.sessionId || initialSessionId;
+                  
+                  setMessages(chatEntries);
+                  setCurrentSessionId(realSessionId);
+                  setHasInteracted(true);
+                  setIsLoadingSession(false);
+                  console.log('Loaded from cache, messages count:', chatEntries.length);
+                  useCache = true;
+                } else {
+                  console.log('Cache exists but missing citations, fetching from API');
+                }
+              }
+            }
+          } catch (cacheErr) {
+            console.warn('Error loading from cache:', cacheErr);
+          }
+          
+          // If we used cache successfully, return early
+          if (useCache) {
+            return;
+          }
+
+          // Fetch from API
+          console.log('Loading session messages for:', initialSessionId);
+          setIsLoadingSession(true);
+          const response = await apiClient.get(`/session/${initialSessionId}/messages?limit=1000`);
+          const messages = response.data || [];
+          
+          console.log('Received messages from API:', messages.length, 'messages');
+          console.log('First message sample:', messages[0]);
+          console.log('First message citations:', messages[0]?.citations);
+          console.log('Assistant messages with citations:', messages.filter((m: any) => m.role === 'assistant' && m.citations && m.citations.length > 0).length);
+          console.log('Response structure:', {
+            data: response.data,
+            status: response.status,
+            isArray: Array.isArray(messages)
+          });
+          
+          if (messages && Array.isArray(messages) && messages.length > 0) {
+            const chatEntries: ChatEntry[] = messages.map((msg: any) => {
+              // Get the real session ID from the first message if available
+              const realSessionId = msg.sessionId || initialSessionId;
+              
+              // Handle citations - check multiple possible field names
+              let citations: any[] = [];
+              if (msg.citations) {
+                if (Array.isArray(msg.citations)) {
+                  citations = msg.citations.filter((c: any) => c != null); // Filter out null/undefined
+                } else if (msg.citations !== null && msg.citations !== undefined) {
+                  citations = [msg.citations];
+                }
+              } else if (msg.citation) {
+                if (Array.isArray(msg.citation)) {
+                  citations = msg.citation.filter((c: any) => c != null);
+                } else if (msg.citation !== null && msg.citation !== undefined) {
+                  citations = [msg.citation];
+                }
+              }
+              
+              // Log citation details for assistant messages
+              if (msg.role === 'assistant') {
+                console.log(`📋 Message ${msg.id?.substring(0, 8)} citations:`, {
+                  raw: msg.citations,
+                  processed: citations,
+                  count: citations.length,
+                  hasUrl: citations.some((c: any) => c?.url),
+                  sample: citations[0]
+                });
+              }
+              
+              return {
+                id: msg.id,
+                role: msg.role,
+                content: msg.role === 'assistant' 
+                  ? (msg.answer || msg.messageText || '') 
+                  : (msg.messageText || msg.answer || ''),
+                timestamp: msg.createdAt || formatTimestamp(),
+                language: msg.language || lang,
+                route: msg.route,
+                safety: msg.safetyData,
+                facts: msg.facts,
+                citations: citations,
+              };
+            });
+            
+            console.log('Mapped chat entries:', chatEntries.length);
+            console.log('First entry citations:', chatEntries[0]?.citations);
+            
+            // Check all assistant messages for citations
+            const assistantMessages = chatEntries.filter((e: ChatEntry) => e.role === 'assistant');
+            console.log('📊 Assistant messages summary:');
+            assistantMessages.forEach((msg: ChatEntry, idx: number) => {
+              console.log(`  Message ${idx + 1}:`, {
+                id: msg.id?.substring(0, 8),
+                hasCitations: !!(msg.citations && msg.citations.length > 0),
+                citationsCount: msg.citations?.length || 0,
+                citations: msg.citations
+              });
+            });
+            
+            // Get real session ID from first message if available
+            const realSessionId = messages[0]?.sessionId || initialSessionId;
+            
+            setMessages(chatEntries);
+            setCurrentSessionId(realSessionId);
+            setHasInteracted(true);
+            setIsLoadingSession(false);
+
+            // Save to cache (use real session ID for cache key if available)
+            try {
+              const cacheData = {
+                data: messages,
+                timestamp: Date.now(),
+              };
+              // Use hashed ID for cache key to match what we'll look for
+              localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+            } catch (cacheErr) {
+              console.warn('Error saving to cache:', cacheErr);
+            }
+          } else {
+            console.warn('No messages found or empty array');
+            setMessages([]);
+            setCurrentSessionId(initialSessionId);
+            setHasInteracted(true);
+            setIsLoadingSession(false);
+          }
+        } catch (err: any) {
+          console.error('Error loading initial session:', err);
+          console.error('Error details:', {
+            status: err.response?.status,
+            data: err.response?.data,
+            message: err.message
+          });
+          setIsLoadingSession(false);
+          if (err.response?.status === 404) {
+            // Session doesn't exist, but don't redirect - just show empty state
+            // The user might have a valid hashed ID that just needs to be resolved
+            console.warn('Session not found (404), but continuing to show page');
+            setMessages([]);
+            setCurrentSessionId(initialSessionId); // Keep the hashed ID for now
+            setHasInteracted(true);
+          } else {
+            // Other errors - still show the page but log the error
+            console.error('Failed to load session:', err);
+            setMessages([]);
+            setCurrentSessionId(initialSessionId);
+            setHasInteracted(true);
+          }
+        }
+      };
+      loadInitialSession();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSessionId, isAuthChecked, customerId]);
+
+  // Debug: Log when messages change
+  useEffect(() => {
+    if (initialSessionId) {
+      console.log('Messages state updated:', {
+        messageCount: messages.length,
+        initialSessionId,
+        currentSessionId,
+        hasInteracted,
+        isLoadingSession
+      });
+      if (messages.length > 0) {
+        console.log('First message:', messages[0]);
+      }
+    }
+  }, [messages, initialSessionId, currentSessionId, hasInteracted, isLoadingSession]);
+
+  // Load chat sessions (minimal data: title, lastActivity) when customerId is available
+  // This loads on mount, not just when sidebar opens, since sidebar may always be open
+  useEffect(() => {
+    if (customerId && isAuthChecked && chatSessions.length === 0 && !sessionsLoading) {
       // Try cache first for instant display
       const cachedSessions = loadChatSessionsFromCache(customerId);
       if (cachedSessions && cachedSessions.length > 0) {
         setChatSessions(cachedSessions);
+        // Fetch fresh data in background (non-blocking)
+        loadChatSessions(customerId, false);
+      } else {
+        // No cache, fetch from API (only minimal data: title, lastActivity)
+        loadChatSessions(customerId, false);
       }
-      // Then fetch fresh data
-      loadChatSessions(customerId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId, isAuthChecked]);
@@ -604,6 +908,22 @@ export default function Home() {
             try {
               const data = JSON.parse(line.slice(6));
               
+              // Check for session_id in any event type and update URL early (before streaming completes)
+              if (data.metadata?.session_id && !currentSessionId) {
+                const newSessionId = data.metadata.session_id;
+                setCurrentSessionId(newSessionId);
+                // Hash the session ID for URL
+                const { hashSessionId } = await import('../utils/sessionHash');
+                const hashedId = await hashSessionId(newSessionId);
+                // Update URL without full page reload using history API only
+                // Don't use router.replace/push as it causes Next.js to remount the component
+                if (typeof window !== 'undefined' && window.location.pathname === '/') {
+                  // Use history.pushState to update URL without triggering Next.js navigation
+                  // This prevents the component from remounting and losing state
+                  window.history.pushState({ sessionId: newSessionId, hashedId }, '', `/${hashedId}`);
+                }
+              }
+              
               if (data.type === 'chunk') {
                 // Append chunk to accumulated content
                 accumulatedContent += data.content || '';
@@ -629,23 +949,46 @@ export default function Home() {
               } else if (data.type === 'done') {
                 // Final message with metadata
                 const finalContent = data.answer || accumulatedContent;
+                const citations = Array.isArray(data.citations) ? data.citations : (data.citations ? [data.citations] : []);
+                
+                console.log('📋 Received "done" event with citations:', {
+                  citationsCount: citations.length,
+                  citations: citations,
+                  hasCitations: !!data.citations,
+                  citationsType: typeof data.citations,
+                  dataKeys: Object.keys(data)
+                });
+                
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessageId
                       ? {
                           ...msg,
                           content: finalContent,
-                          citations: Array.isArray(data.citations) ? data.citations : (data.citations ? [data.citations] : []),
+                          citations: citations,
                           facts: data.facts || [],
                           safety: data.safety,
                         }
                       : msg
                   )
                 );
+                
+                console.log('✅ Updated message with citations:', citations.length);
 
-                // Update session ID if provided
+                // Update session ID if provided (URL already updated earlier if it was a new session)
                 if (data.metadata?.session_id) {
-                  setCurrentSessionId(data.metadata.session_id);
+                  const newSessionId = data.metadata.session_id;
+                  if (!currentSessionId || currentSessionId !== newSessionId) {
+                    setCurrentSessionId(newSessionId);
+                    // Only update URL if we haven't already (to avoid double navigation)
+                    const { hashSessionId } = await import('../utils/sessionHash');
+                    const hashedId = await hashSessionId(newSessionId);
+                    if (typeof window !== 'undefined' && window.location.pathname === '/') {
+                      // Use history.pushState to update URL without triggering Next.js navigation
+                      // This prevents the component from remounting and losing state
+                      window.history.pushState({ sessionId: newSessionId, hashedId }, '', `/${hashedId}`);
+                    }
+                  }
                 }
 
                 // Reload chat sessions after receiving response (immediate load after message)
@@ -823,8 +1166,16 @@ export default function Home() {
   }, []);
 
   // Don't render anything until auth check is complete
-  if (!isAuthChecked) {
-    return null;
+  // If we have initialSessionId, render the full layout immediately (auth check happens in background)
+  // This ensures the loading animation shows in the proper context, not on a blank screen
+  if (!isAuthChecked && !initialSessionId) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-950">
+        <div className="w-full max-w-4xl px-4">
+          <LoadingSkeleton variant="message" count={3} />
+        </div>
+      </div>
+    );
   }
 
   // Handle welcome screen completion
@@ -922,80 +1273,10 @@ export default function Home() {
   };
 
   const handleSelectSession = async (sessionId: string) => {
-    try {
-      // Try to load from cache first
-      const cacheKey = `session_messages_${sessionId}`;
-      try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          const { data, timestamp } = JSON.parse(cached);
-          // Use cache if less than 5 minutes old
-          if (Date.now() - timestamp < 5 * 60 * 1000 && data && Array.isArray(data)) {
-            const chatEntries: ChatEntry[] = data.map((msg: any) => ({
-              id: msg.id,
-              role: msg.role,
-              content: msg.role === 'assistant' 
-                ? (msg.answer || msg.messageText || '') 
-                : (msg.messageText || msg.answer || ''),
-              timestamp: msg.createdAt || formatTimestamp(),
-              language: msg.language || lang,
-              route: msg.route,
-              safety: msg.safetyData,
-              facts: msg.facts,
-              citations: Array.isArray(msg.citations) ? msg.citations : (msg.citations ? [msg.citations] : []),
-            }));
-            setMessages(chatEntries);
-            setCurrentSessionId(sessionId);
-            setHasInteracted(true);
-            setError(null);
-            setIsSidebarOpen(false); // Close sidebar on mobile after selection
-          }
-        }
-      } catch (cacheErr) {
-        console.warn('Error loading from cache:', cacheErr);
-      }
-
-      // Fetch the session with messages from API
-      const response = await apiClient.get(`/session/${sessionId}/messages?limit=1000`);
-      const messages = response.data || [];
-      
-      if (messages && Array.isArray(messages)) {
-        // Convert session messages to ChatEntry format
-        const chatEntries: ChatEntry[] = messages.map((msg: any) => ({
-          id: msg.id,
-          role: msg.role,
-          content: msg.role === 'assistant' 
-            ? (msg.answer || msg.messageText || '') 
-            : (msg.messageText || msg.answer || ''),
-          timestamp: msg.createdAt || formatTimestamp(),
-          language: msg.language || lang,
-          route: msg.route,
-          safety: msg.safetyData,
-          facts: msg.facts,
-          citations: Array.isArray(msg.citations) ? msg.citations : (msg.citations ? [msg.citations] : []),
-        }));
-        
-        setMessages(chatEntries);
-        setCurrentSessionId(sessionId);
-        setHasInteracted(true);
-        setError(null);
-        setIsSidebarOpen(false); // Close sidebar on mobile after selection
-
-        // Save to cache
-        try {
-          const cacheData = {
-            data: messages,
-            timestamp: Date.now(),
-          };
-          localStorage.setItem(cacheKey, JSON.stringify(cacheData));
-        } catch (cacheErr) {
-          console.warn('Error saving to cache:', cacheErr);
-        }
-      }
-    } catch (err: any) {
-      console.error('Error loading session:', err);
-      setError('Failed to load chat session');
-    }
+    // Hash the session ID for URL and navigate to session route
+    const { hashSessionId } = await import('../utils/sessionHash');
+    const hashedId = await hashSessionId(sessionId);
+    router.push(`/${hashedId}`);
   };
 
   return (
@@ -1041,10 +1322,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => {
-                setMessages([]);
-                setInputValue('');
-                setError(null);
-                setHasInteracted(false);
+                router.push('/');
               }}
               className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-emerald-400/50 hover:bg-slate-800/70 hover:text-white mb-1"
             >
@@ -1078,6 +1356,7 @@ export default function Home() {
                   const formatDate = (dateString: string) => {
                     const date = new Date(dateString);
                     const now = new Date();
+                    // Calculate difference in milliseconds (works correctly with UTC timestamps)
                     const diffMs = now.getTime() - date.getTime();
                     const diffMins = Math.floor(diffMs / 60000);
                     const diffHours = Math.floor(diffMs / 3600000);
@@ -1087,7 +1366,8 @@ export default function Home() {
                     if (diffMins < 60) return `${diffMins}m ago`;
                     if (diffHours < 24) return `${diffHours}h ago`;
                     if (diffDays < 7) return `${diffDays}d ago`;
-                    return date.toLocaleDateString();
+                    // Format date in IST timezone
+                    return date.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
                   };
 
                   const isActive = currentSessionId === session.id;
@@ -1120,7 +1400,7 @@ export default function Home() {
                         <div className="flex items-start justify-between gap-2 w-full">
                           <div className="flex-1 min-w-0 overflow-hidden">
                             <p className="text-xs text-slate-400 mb-1 truncate">
-                              {formatDate(session.createdAt)}
+                              {formatDate(session.lastActivityAt || session.createdAt)}
                             </p>
                             <p className="font-medium truncate text-sm">
                               {sessionTitle}
@@ -1169,7 +1449,7 @@ export default function Home() {
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-white">
-                {getAuthUser()?.fullName || getAuthUser()?.email?.split('@')[0] || 'User'}
+                {userDisplayName}
               </p>
               <p className="text-xs text-slate-400">Free</p>
             </div>
@@ -1301,7 +1581,7 @@ export default function Home() {
 
         <main className="flex-1 px-3 pb-28 pt-20 sm:px-4 sm:pb-32 sm:pt-24 md:px-6 md:pt-28 lg:px-10">
           <div className="mx-auto flex h-full max-w-4xl flex-col gap-4 sm:gap-6">
-            {messages.length === 0 && (
+            {messages.length === 0 && !initialSessionId && !isLoading && !isLoadingSession && (
               <section className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-5 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl sm:rounded-[30px] sm:px-5 sm:py-6 md:px-6 lg:px-8">
                 <div
                   className="absolute inset-y-0 right-0 w-[55%] opacity-60 blur-3xl bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500"
@@ -1337,6 +1617,7 @@ export default function Home() {
               </section>
             )}
 
+            {(messages.length > 0 || initialSessionId || isLoadingSession) && (
             <section className="relative overflow-hidden flex-1 rounded-[28px] border border-white/10 bg-slate-900/55 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl">
               <div
                 className="absolute inset-y-0 right-0 w-[45%] opacity-60 blur-3xl bg-gradient-to-br from-teal-500 via-green-500 to-emerald-500"
@@ -1347,15 +1628,19 @@ export default function Home() {
                   ref={scrollContainerRef}
                   className="flex-1 overflow-y-auto px-3 py-4 sm:px-5 lg:px-6"
                   aria-live="polite"
-                  aria-busy={isLoading}
+                  aria-busy={isLoading || isLoadingSession}
                 >
+                  {(isLoadingSession || (initialSessionId && messages.length === 0 && !isLoading)) && (
+                    <div className="px-1 sm:px-2 lg:px-3">
+                      <LoadingSkeleton variant="message" count={2} />
+                    </div>
+                  )}
                   <div
                     className="mx-auto flex w-full flex-col gap-4 px-1 sm:px-2 lg:max-w-3xl lg:px-3"
                     role="list"
                     aria-live="polite"
                   >
-
-        {messages.map((message, index) => (
+        {messages.length > 0 && messages.map((message, index) => (
                   <div key={message.id} className="space-y-4">
                     <ChatMessage message={message} index={index} />
 
@@ -1501,11 +1786,6 @@ export default function Home() {
             )}
           </div>
         ))}
-        {isLoading && (
-                      <div className="space-y-4">
-                        <LoadingSkeleton count={1} />
-                      </div>
-                    )}
                     {error && !isLoading && (
                       <div className="mt-2">
                         <ErrorCallout message={error} onDismiss={handleDismissError} />
@@ -1516,6 +1796,7 @@ export default function Home() {
                 </div>
               </div>
             </section>
+            )}
           </div>
         </main>
       </div>
