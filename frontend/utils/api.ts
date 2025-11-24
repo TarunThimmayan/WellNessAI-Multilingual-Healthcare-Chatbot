@@ -3,7 +3,7 @@
  * This ensures cookies (JWT tokens) are sent with all requests
  */
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { updateActivity } from './auth';
+import { updateActivity, clearAuth } from './auth';
 
 // Support both NEXT_PUBLIC_BACKEND_URL and NEXT_PUBLIC_API_BASE for flexibility
 const API_BASE =
@@ -46,48 +46,76 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    // If error is 401 and we haven't tried to refresh yet
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      if (isRefreshing) {
-        // If already refreshing, queue this request
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${token}`;
-            }
-            return apiClient(originalRequest);
-          })
-          .catch((err) => {
-            return Promise.reject(err);
-          });
+    // Helper function to clear auth and redirect to login
+    const handleUnauthorized = () => {
+      if (typeof window !== 'undefined') {
+        // Clear all auth tokens and sessions
+        clearAuth();
+        // Clear user info cache if it exists
+        localStorage.removeItem('user_info');
+        // Set flag to show session expired message
+        sessionStorage.setItem('authExpired', 'true');
+        // Redirect to auth page
+        window.location.href = '/auth';
+      }
+    };
+
+    // If error is 401
+    if (error.response?.status === 401) {
+      const requestUrl = originalRequest?.url || '';
+      
+      // If the request is to /auth/refresh or /auth/me, don't try to refresh
+      // Just clear auth and redirect (these endpoints returning 401 means session is expired)
+      if (requestUrl.includes('/auth/refresh') || requestUrl.includes('/auth/me')) {
+        handleUnauthorized();
+        return Promise.reject(error);
       }
 
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        // Try to refresh the token using apiClient to ensure baseURL is used
-        const response = await apiClient.post(
-          '/auth/refresh',
-          {}
-        );
-
-        if (response.status === 200) {
-          processQueue(null, null);
-          // Retry the original request
-          return apiClient(originalRequest);
+      // For other endpoints, try to refresh token if we haven't tried yet
+      if (!originalRequest._retry) {
+        if (isRefreshing) {
+          // If already refreshing, queue this request
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          })
+            .then((token) => {
+              if (originalRequest.headers) {
+                originalRequest.headers.Authorization = `Bearer ${token}`;
+              }
+              return apiClient(originalRequest);
+            })
+            .catch((err) => {
+              return Promise.reject(err);
+            });
         }
-      } catch (refreshError) {
-        processQueue(refreshError as AxiosError, null);
-        // If refresh fails, redirect to login
-        if (typeof window !== 'undefined') {
-          window.location.href = '/auth';
+
+        originalRequest._retry = true;
+        isRefreshing = true;
+
+        try {
+          // Try to refresh the token using apiClient to ensure baseURL is used
+          const response = await apiClient.post(
+            '/auth/refresh',
+            {}
+          );
+
+          if (response.status === 200) {
+            processQueue(null, null);
+            // Retry the original request
+            return apiClient(originalRequest);
+          }
+        } catch (refreshError) {
+          processQueue(refreshError as AxiosError, null);
+          // If refresh fails, clear auth and redirect to login
+          handleUnauthorized();
+          return Promise.reject(refreshError);
+        } finally {
+          isRefreshing = false;
         }
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
+      } else {
+        // Already tried to refresh and still got 401, clear auth and redirect
+        handleUnauthorized();
+        return Promise.reject(error);
       }
     }
 
