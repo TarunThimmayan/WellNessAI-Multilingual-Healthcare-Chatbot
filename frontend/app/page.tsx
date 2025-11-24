@@ -33,6 +33,7 @@ import TopicSuggestions from '../components/TopicSuggestions';
 import WelcomeScreen from '../components/WelcomeScreen';
 import SearchChatsModal from '../components/SearchChatsModal';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
+import QuickLoader from '../components/QuickLoader';
 import { TOPIC_CATEGORIES } from '../data/topics';
 import { CalendarDays, Heart, MapPin, Stethoscope } from 'lucide-react';
 
@@ -160,6 +161,7 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
   const [showSafety, setShowSafety] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isAuthChecked, setIsAuthChecked] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
   const [profile, setProfile] = useState<Profile>(defaultProfile);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -364,10 +366,12 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
     // Check if token has expired
     if (!isAuthenticated()) {
       // Token expired or not authenticated, redirect to auth with message
+      setIsRedirecting(true);
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('authExpired', 'true');
       }
       router.push('/auth');
+      return;
     } else {
       setIsAuthChecked(true);
       // Update activity on mount (user is active)
@@ -1174,17 +1178,16 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
     return () => media.removeEventListener('change', handleChange);
   }, []);
 
+  // Show proper loading screen when redirecting due to auth failure
+  if (isRedirecting) {
+    return <QuickLoader />;
+  }
+
   // Don't render anything until auth check is complete
   // If we have initialSessionId, render the full layout immediately (auth check happens in background)
   // This ensures the loading animation shows in the proper context, not on a blank screen
   if (!isAuthChecked && !initialSessionId) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-slate-900">
-        <div className="w-full max-w-4xl px-4">
-          <LoadingSkeleton variant="message" count={3} />
-        </div>
-      </div>
-    );
+    return <QuickLoader />;
   }
 
   // Handle welcome screen completion
