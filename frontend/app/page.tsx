@@ -1328,7 +1328,7 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
         id="primary-navigation"
         data-overlay={isSidebarOpen && !isDesktop}
       >
-        <div className="flex items-center gap-2 pt-12 sm:pt-0 sm:flex">
+        <div className="flex items-center gap-2 pt-16 sm:pt-6 md:pt-8 sm:flex">
           <span className="flex-shrink-0 rounded-full bg-gradient-to-br from-emerald-500 via-green-500 to-teal-500 p-1.5 text-white shadow-[0_0_25px_rgba(16,185,129,0.45)] sm:p-2">
             <Sparkle className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden />
           </span>
@@ -1346,7 +1346,7 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
             className="flex-shrink-0 rounded-full border border-white/20 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 transition hover:border-white/40 hover:bg-slate-800/50 hover:text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
             aria-label="Close sidebar"
           >
-            <X className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden />
+            <X className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-red-400 drop-shadow-[0_0_4px_rgba(248,113,113,0.6)]" aria-hidden />
           </button>
         </div>
 
@@ -1521,14 +1521,14 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
       <div className={collapseRailClasses} aria-hidden={isSidebarOpen}>
             <button
                 type="button"
-          onClick={() => setIsSidebarOpen(true)}
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-slate-900/70 text-white shadow-[0_0_35px_rgba(16,185,129,0.3)] transition hover:border-emerald-400/70 hover:text-emerald-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
               >
           <Sparkle className="h-5 w-5 text-emerald-300" aria-hidden />
             </button>
               <button
                 type="button"
-          onClick={() => setIsSidebarOpen(true)}
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           className="flex flex-col items-center gap-1 text-xs font-semibold uppercase tracking-[0.32em] text-emerald-300"
         >
           <Menu className="h-4 w-4" aria-hidden />
@@ -1549,7 +1549,7 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
           <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 min-w-0 flex-1">
           <button
                 type="button"
-              onClick={() => setIsSidebarOpen(true)}
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               aria-expanded={isSidebarOpen}
               aria-controls="primary-navigation"
               className="inline-flex items-center justify-center gap-1 rounded-full border border-white/10 bg-slate-900/70 px-2 py-2 min-h-[44px] min-w-[44px] text-xs font-semibold text-slate-200 shadow-[0_0_25px_rgba(16,185,129,0.18)] transition hover:border-emerald-400/70 hover:text-emerald-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400 sm:gap-1.5 sm:px-2.5 sm:py-2 sm:text-sm lg:hidden"
@@ -1624,7 +1624,7 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
               </div>
         </header>
 
-        <main className="flex-1 px-2.5 sm:px-3 md:px-4 lg:px-6 xl:px-10 pb-24 sm:pb-28 md:pb-32 pt-16 sm:pt-20 md:pt-24 lg:pt-28 w-full max-w-full overflow-x-hidden">
+        <main className="flex-1 px-2.5 sm:px-3 md:px-4 lg:px-6 xl:px-10 pb-24 sm:pb-28 md:pb-32 pt-20 sm:pt-20 md:pt-24 lg:pt-28 w-full max-w-full overflow-x-hidden">
           <div className="mx-auto flex h-full max-w-4xl flex-col gap-3 sm:gap-4 md:gap-6 w-full">
             {messages.length === 0 && !initialSessionId && !isLoading && !isLoadingSession && (
               <section className="relative overflow-hidden rounded-xl sm:rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-4 shadow-[0_35px_90px_rgba(15,23,42,0.65)] backdrop-blur-xl sm:px-4 sm:py-5 md:rounded-2xl md:px-5 md:py-6 lg:px-6 xl:px-8 w-full max-w-full">
@@ -1671,7 +1671,7 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
               <div className="relative flex h-full flex-col">
                 <div
                   ref={scrollContainerRef}
-                  className="flex-1 overflow-y-auto px-3 pt-12 pb-4 sm:px-5 sm:pt-16 lg:px-6 lg:pt-20"
+                  className="flex-1 overflow-y-auto px-3 pt-16 pb-4 sm:px-5 sm:pt-16 lg:px-6 lg:pt-20"
                   aria-live="polite"
                   aria-busy={isLoading || isLoadingSession}
                 >
@@ -1681,7 +1681,7 @@ export default function Home({ initialSessionId }: HomeProps = {}) {
                     </div>
                   )}
                   <div
-                    className="mx-auto flex w-full flex-col gap-4 px-1 pt-4 sm:px-2 sm:pt-6 lg:max-w-3xl lg:px-3 lg:pt-8"
+                    className="mx-auto flex w-full flex-col gap-4 px-1 pt-6 sm:px-2 sm:pt-6 lg:max-w-3xl lg:px-3 lg:pt-8"
                     role="list"
                     aria-live="polite"
                   >
